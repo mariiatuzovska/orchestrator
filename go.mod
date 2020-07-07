@@ -1,0 +1,14 @@
+module github.com/mariiatuzovska/orchestrator
+
+go 1.13
+
+require (
+	github.com/dgrijalva/jwt-go v3.2.0+incompatible // indirect
+	github.com/labstack/echo v3.3.10+incompatible
+	github.com/labstack/gommon v0.3.0 // indirect
+	github.com/melbahja/goph v0.3.1
+	github.com/progrium/go-shell v0.0.0-20181023041501-104b11941186
+	github.com/stretchr/testify v1.4.0
+	github.com/urfave/cli v1.22.4
+	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9 // indirect
+)

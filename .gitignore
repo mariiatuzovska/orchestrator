@@ -1,0 +1,6 @@
+# files
+*.json
+
+# packages
+cmd/cmd
+builds/*
