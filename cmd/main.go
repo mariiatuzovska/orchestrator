@@ -10,7 +10,7 @@ import (
 
 func main() {
 	app := cli.NewApp()
-	app.Name = "orchestartor"
+	app.Name = "orchestrator"
 	app.Version = "0.0.1"
 	app.Copyright = "2020, mariiatuzovska"
 	app.Authors = []cli.Author{{Name: "Tuzovska Mariia"}}

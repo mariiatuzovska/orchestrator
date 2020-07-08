@@ -1,7 +1,8 @@
-package orchestartor
+package orchestrator
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/labstack/echo"
@@ -13,67 +14,42 @@ var (
 	Version                             = "0.0.1"
 )
 
-type Orchestartor struct {
+type Orchestrator struct {
 	service    Configuration
 	status     map[ServiceName]*ServiceStatus
-	nodestatus map[NodeName]*NodeStatus
-	event      chan NodeStatus
+	nodestatus NodeStatus
+	event      chan Event
 }
 
-// Status - general structure for Services, Nodes and orchestrator
-type Status struct {
-	OK     bool // is running
-	Status int
-	Error  error // last fatal error or nil
+type Event struct {
+	Name   NodeName
+	Status *Status
 }
 
-type ServiceStatus struct {
-	DNS   string
-	Nodes []*NodeStatus
-}
-
-type NodeStatus struct {
-	NodeName NodeName
-	*Node
-	Status                 *Status
-	ThisUpdate, NextUpdate string
-}
-
-func NewOrchestrator(config *Configuration) (*Orchestartor, error) {
+func NewOrchestrator(config *Configuration) (*Orchestrator, error) {
 	if !config.Valid() {
-		return nil, errors.New("Orchestartor: configuration file is not valid")
+		return nil, errors.New("Orchestrator: configuration file is not valid")
 	}
-	status, nodestatus := make(map[ServiceName]*ServiceStatus), make(map[NodeName]*NodeStatus)
+	o := &Orchestrator{*config, make(map[ServiceName]*ServiceStatus), make(NodeStatus), make(chan Event, 100)}
 	for srvName, srv := range *config {
-		if _, exist := status[srvName]; exist {
-			return nil, errors.New("Orchestartor: service name is not unique / already defined")
+		if _, exist := o.status[srvName]; exist {
+			return nil, fmt.Errorf("Orchestrator: service %s is not unique / already defined", srvName)
 		}
-		aNodeStatus := make([]*NodeStatus, 0)
-		for _, node := range srv.Nodes {
-			if !node.valid() {
-				return nil, errors.New("Orchestartor: node is not valid")
+		for name, node := range srv.Nodes {
+			if err := node.valid(); err != nil {
+				return nil, fmt.Errorf("Orchestrator: %s: %s", name, err.Error())
 			}
-			name := NewNodeName(srvName, node.Key)
-			if _, exist := nodestatus[name]; exist {
-				return nil, errors.New("Orchestartor: node name is not unique / already defined")
+			if _, exist := o.nodestatus[name]; exist {
+				return nil, fmt.Errorf("Orchestrator: node %s is not unique / already defined", name)
 			}
-			nodestatus[name] = &NodeStatus{name, node, nil, "", ""}
-			aNodeStatus = append(aNodeStatus, nodestatus[name])
+			o.nodestatus[name] = NewInitializedStatus()
 		}
-		status[srvName] = &ServiceStatus{srv.DNS, aNodeStatus}
+		o.status[srvName] = &ServiceStatus{srv.DNS, &o.nodestatus}
 	}
-	return &Orchestartor{*config, status, nodestatus, make(chan NodeStatus, 100)}, nil
+	return o, nil
 }
 
-// func (o *Orchestartor) Valid() bool {
-// 	return o.service[OrchestratorServiceName].Valid()
-// }
-
-// func (o *Orchestartor) Status() *Status {
-// 	return o.service[OrchestratorServiceName].Status()
-// }
-
-func (o *Orchestartor) Start() error {
+func (o *Orchestrator) Start() error {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
@@ -91,22 +67,22 @@ func (o *Orchestartor) Start() error {
 	return e.Start(o.service[OrchestratorServiceName].DNS)
 }
 
-func (o *Orchestartor) Go() error {
-	for srvName, srv := range o.service {
-		for _, node := range srv.Nodes {
-			go node.Go(srvName, o.event)
+func (o *Orchestrator) Go() error {
+	for _, srv := range o.service {
+		for name, node := range srv.Nodes {
+			go node.Go(name, o.event)
 		}
 	}
 	for {
 		e := <-o.event
-		nodestatus, ok := o.nodestatus[e.NodeName]
+		_, ok := o.nodestatus[e.Name]
 		if !ok {
-			return errors.New("Orchestartor: undefined node")
+			return errors.New("Orchestrator: undefined node")
 		}
-		nodestatus.Status = e.Status
+		o.nodestatus[e.Name] = e.Status
 	}
 }
 
-func (o *Orchestartor) Stop() error {
+func (o *Orchestrator) Stop() error {
 	return nil
 }

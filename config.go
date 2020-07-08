@@ -1,4 +1,4 @@
-package orchestartor
+package orchestrator
 
 import (
 	"encoding/json"
@@ -34,31 +34,34 @@ func NewConfiguration(configPath string) (*Configuration, error) {
 func DefaultConfiguration() *Configuration {
 	def := &Configuration{
 		OrchestratorServiceName: {
-			DNS: "https://orchestrator.com.ua",
-			Nodes: []*Node{
-				{
+			DNS: "orchestrator.com.ua",
+			Nodes: Nodes{
+				"orchestartor_1": {
 					Romote:           false,
 					StartImmediately: false,
 					OS:               "darwin",
 					HTTPAccess: []HTTPAccess{
 						{
-							Address:    "https://orchestrator.com.ua/orchestrator/status",
+							Address:    "http://orchestrator.com.ua/orchestrator/status",
 							Method:     "GET",
 							StatusCode: 200,
 						},
 						{
-							Address:    "https://orchestrator.com.ua/orchestrator/service",
+							Address:    "http://orchestrator.com.ua/orchestrator/service",
 							Method:     "GET",
 							StatusCode: 200,
 						},
 					},
 					Commands: Commands{
-						Start:  "launchctl load com.orchestrator.app.plist",
-						Stop:   "launchctl unload com.orchestrator.app.plist",
-						Status: "launchctl list | grep com.orchestrator.app",
+						"start":  "launchctl load ~/Library/LaunchAgents/com.orchestrator.app.plist",
+						"stop":   "launchctl unload ~/Library/LaunchAgents/com.orchestrator.app.plist",
+						"status": "launchctl list | grep com.orchestrator.app",
 					},
 					Settings: Settings{
 						Timeout: 30,
+						StatusCommands: Commands{
+							"status": "-\t0\tcom.orchestrator.app\n",
+						},
 					},
 				},
 			},

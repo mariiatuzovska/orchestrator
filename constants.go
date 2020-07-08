@@ -1,13 +1,17 @@
-package orchestartor
+package orchestrator
 
 const (
 	StatusInitialized = iota
 	StatusRunning
 	StatusStopped
 	StatusUnknown
-	StatusHTTPAccesMethodFailed
-	StatusGetStatusFailed
-	StatusGetIsActiveFailed
+	StatusFailed
+	StatusOK
+	// Names
+	StatusNameGeneral
+	StatusNameHTTPAccess
+	StatusNameStatus
+	StausNameIsActive
 )
 
 const (
@@ -27,13 +31,19 @@ const (
 )
 
 var StatusNameMap = map[int]string{
-	StatusInitialized:           "Initialized",
-	StatusRunning:               "Running",
-	StatusStopped:               "Stoped",
-	StatusUnknown:               "Unknown",
-	StatusHTTPAccesMethodFailed: "HTTP access method failed",
-	StatusGetIsActiveFailed:     "IsActive command failed",
-	StatusGetStatusFailed:       "Status command failed",
+	StatusNameGeneral:    "General",
+	StatusNameHTTPAccess: "HTTPAccess",
+	StatusNameStatus:     "Status",
+	StausNameIsActive:    "IsActive",
+}
+
+var StatusMap = map[int]string{
+	StatusInitialized: "Initialized",
+	StatusRunning:     "Running",
+	StatusStopped:     "Stoped",
+	StatusUnknown:     "Unknown",
+	StatusFailed:      "Failed",
+	StatusOK:          "OK",
 }
 
 var HttpMethodMap = map[string]bool{
