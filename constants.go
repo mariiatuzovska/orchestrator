@@ -1,50 +1,23 @@
 package orchestrator
 
 const (
-	StatusInitialized = iota
-	StatusRunning
-	StatusStopped
-	StatusUnknown
-	StatusFailed
-	StatusOK
-	// Names
-	StatusNameGeneral
-	StatusNameHTTPAccess
-	StatusNameStatus
-	StausNameIsActive
+	StatusInitialized StatusValue = "Initialized"
+	StatusRunning     StatusValue = "Running"
+	StatusStopped     StatusValue = "Stopped"
+	StatusFailed      StatusValue = "Failed"
+	StatusPassed      StatusValue = "Passed"
+	StatusUnknown     StatusValue = "Unknown"
+
+	SettingValueNever     SettingValue = "Never"
+	SettingValueNow       SettingValue = "Now"
+	SettingValueOnFailure SettingValue = "OnFailure"
 )
 
 const (
-	OSLinux = iota
-	OSWindows
-	OSDarwin
+	OSLinux   = "linux"
+	OSWindows = "windows"
+	OSDarwin  = "darwin"
 )
-
-const (
-	TypeOrchestrator = iota
-)
-
-const (
-	SettingsNever = iota
-	SettingsNow
-	SettingsOnFailure
-)
-
-var StatusNameMap = map[int]string{
-	StatusNameGeneral:    "General",
-	StatusNameHTTPAccess: "HTTPAccess",
-	StatusNameStatus:     "Status",
-	StausNameIsActive:    "IsActive",
-}
-
-var StatusMap = map[int]string{
-	StatusInitialized: "Initialized",
-	StatusRunning:     "Running",
-	StatusStopped:     "Stoped",
-	StatusUnknown:     "Unknown",
-	StatusFailed:      "Failed",
-	StatusOK:          "OK",
-}
 
 var HttpMethodMap = map[string]bool{
 	"GET":    true,
@@ -54,10 +27,10 @@ var HttpMethodMap = map[string]bool{
 	"DELETE": true,
 }
 
-var SettingsMap = map[string]int{
-	"never":      SettingsNever,
-	"on-failure": SettingsOnFailure,
-	"now":        SettingsNow,
+var SettingValueMap = map[SettingValue]bool{
+	SettingValueNever:     true,
+	SettingValueNow:       true,
+	SettingValueOnFailure: true,
 }
 
 var DefaultTimeout = 300 // seconds

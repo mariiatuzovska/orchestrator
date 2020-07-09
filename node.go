@@ -12,14 +12,14 @@ import (
 )
 
 type Node struct {
-	Closed           bool
-	StartImmediately bool         // starts node immediately
-	Romote           bool         // Local/Remote
-	OS               string       // linux / darwin / windows
-	HTTPAccess       []HTTPAccess // http access settings
+	Alive            bool   // is node alive
+	StartImmediately bool   // starts node immediately
+	Romote           bool   // Local / Remote
+	OS               string // linux / darwin / windows
 	Connection       *Connection
 	Commands         Commands
-	Settings         Settings
+	HTTPAccess       []*HTTPAccess // http access settings
+	Settings         *Settings
 }
 
 type Connection struct {
@@ -37,13 +37,22 @@ type HTTPAccess struct {
 	Headers    map[string]string
 }
 
-type Commands map[string]string
+type Commands map[CommandName]*Command
+
+type CommandName string
+
+type Command struct {
+	GetStatus bool
+	Stdin     string
+	Stdout    string
+}
+
+type SettingValue string
 
 type Settings struct {
-	Restart        string   // default = never
-	Reload         string   // default = never
-	StatusCommands Commands // commands for getting status
-	Timeout        int
+	Restart SettingValue // default = never
+	Reload  SettingValue // default = never
+	Timeout int
 }
 
 // NodeName is a {ServiceName}_{NodeKey}
@@ -54,59 +63,54 @@ type NodeStatus map[NodeName]*Status
 // Nodes is a map NodeName : Node
 type Nodes map[NodeName]*Node
 
-func (n *Node) CommandExist(command string) bool {
+func (n *Node) CommandExist(command CommandName) bool {
 	_, ok := n.Commands[command]
 	return ok
 }
 
 func (n *Node) Status() *Status {
-	status := NewStatus()
+	status := NewStatusFailed("")
 	for _, aMethod := range n.HTTPAccess {
 		err := aMethod.do()
 		if err != nil {
-			status.SetListStatus(StatusNameHTTPAccess, StatusFailed)
-			status.SetListStatus(StatusNameGeneral, StatusFailed)
+			n.Alive = false
 			status.Error = err.Error()
+			status.SetListStatus("HTTPAccess", StatusFailed)
 			return status
 		}
-		status.SetListStatus(StatusNameHTTPAccess, StatusOK)
+		status.SetListStatus("HTTPAccess", StatusPassed)
 	}
-	if n.Settings.StatusCommands != nil {
-		status.OK = true
-		status.SetListStatus(StatusNameGeneral, StatusRunning)
-		for command, response := range n.Settings.StatusCommands {
-			if n.CommandExist(command) {
-				out, err := n.run(n.Commands[command])
+	if n.Commands != nil {
+		for name, command := range n.Commands {
+			if command.GetStatus {
+				out, err := n.run(command.Stdin)
 				if err != nil {
-					status.SetListStatus(StatusNameStatus, StatusFailed)
-					status.SetListStatus(StatusNameGeneral, StatusStopped)
+					n.Alive = false
 					status.Error = err.Error()
+					status.SetListStatus(name, StatusFailed)
 					return status
 				}
-				if response != "" && response != out {
-					status.List[command] = StatusMap[StatusFailed]
-					status.SetListStatus(StatusNameGeneral, StatusFailed)
-					status.OK = false
-				} else if response == "" {
-					status.List[command] = out
+				if command.Stdout != "" && command.Stdout != out {
+					n.Alive = false
+					status.SetListStatus(name, StatusFailed)
+					return status
+				} else if command.Stdout == "" {
+					status.SetListStatus(name, StatusValue(out))
 				} else {
-					status.List[command] = StatusMap[StatusOK]
+					status.SetListStatus(name, StatusPassed)
 				}
-			} else {
-				status.List[command] = StatusMap[StatusUnknown]
 			}
 		}
-	} else {
-		status.OK = true
-		status.SetListStatus(StatusNameGeneral, StatusRunning)
 	}
+	status.GeneralStatus = StatusRunning
+	n.Alive = true
 	return status
 }
 
 func (n *Node) Go(name NodeName, event chan Event) error {
 	for {
-		if n.Closed {
-			event <- Event{name, NewStoppedStatus(fmt.Sprintf("%s node is closed", name))}
+		if n.Settings.Timeout <= 0 {
+			event <- Event{name, n.Status()}
 			break
 		}
 		status, d := n.Status(), time.Duration(n.Settings.Timeout)*time.Second
@@ -146,18 +150,17 @@ func (n *Node) valid() error {
 			return err
 		}
 	}
-	if n.OS != "darwin" && n.OS != "linux" && n.OS != "windows" {
+	if n.OS != OSDarwin && n.OS != OSLinux && n.OS != OSWindows {
 		return errors.New("Node validation: unknown OS")
 	}
-	if _, ok := SettingsMap[n.Settings.Restart]; !ok {
+	if _, ok := SettingValueMap[n.Settings.Restart]; !ok {
 		n.Settings.Restart = "never"
 	}
-	if _, ok := SettingsMap[n.Settings.Reload]; !ok {
+	if _, ok := SettingValueMap[n.Settings.Reload]; !ok {
 		n.Settings.Reload = "never"
 	}
 	if n.Settings.Timeout <= 0 {
 		n.Settings.Timeout = -1
-		n.Closed = true
 	}
 	return nil
 }

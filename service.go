@@ -1,7 +1,7 @@
 package orchestrator
 
 type Service struct {
-	DNS   string
+	URL   string
 	Nodes Nodes
 }
 
@@ -10,6 +10,6 @@ type Service struct {
 type ServiceName string
 
 type ServiceStatus struct {
-	DNS   string
-	Nodes *NodeStatus
+	URL          string
+	NodeStatuses map[NodeName]StatusValue
 }

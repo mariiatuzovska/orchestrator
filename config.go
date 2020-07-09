@@ -34,34 +34,36 @@ func NewConfiguration(configPath string) (*Configuration, error) {
 func DefaultConfiguration() *Configuration {
 	def := &Configuration{
 		OrchestratorServiceName: {
-			DNS: "orchestrator.com.ua",
+			URL: "localhost:6000",
 			Nodes: Nodes{
 				"orchestartor_1": {
 					Romote:           false,
 					StartImmediately: false,
 					OS:               "darwin",
-					HTTPAccess: []HTTPAccess{
+					HTTPAccess: []*HTTPAccess{
 						{
-							Address:    "http://orchestrator.com.ua/orchestrator/status",
+							Address:    "http://localhost:6000/orchestrator/nodes/orchestrator",
 							Method:     "GET",
 							StatusCode: 200,
 						},
 						{
-							Address:    "http://orchestrator.com.ua/orchestrator/service",
+							Address:    "http://localhost:6000/orchestrator/configuration/orchestrator",
+							Method:     "GET",
+							StatusCode: 200,
+						},
+						{
+							Address:    "http://localhost:6000/orchestrator/services/orchestrator",
 							Method:     "GET",
 							StatusCode: 200,
 						},
 					},
 					Commands: Commands{
-						"start":  "launchctl load ~/Library/LaunchAgents/com.orchestrator.app.plist",
-						"stop":   "launchctl unload ~/Library/LaunchAgents/com.orchestrator.app.plist",
-						"status": "launchctl list | grep com.orchestrator.app",
+						"start":  &Command{false, "launchctl load ~/Library/LaunchAgents/com.orchestrator.app.plist", ""},
+						"stop":   &Command{false, "launchctl unload ~/Library/LaunchAgents/com.orchestrator.app.plist", ""},
+						"status": &Command{true, "launchctl list | grep com.orchestrator.app", "-\t0\tcom.orchestrator.app\n"},
 					},
-					Settings: Settings{
+					Settings: &Settings{
 						Timeout: 30,
-						StatusCommands: Commands{
-							"status": "-\t0\tcom.orchestrator.app\n",
-						},
 					},
 				},
 			},
