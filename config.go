@@ -7,7 +7,10 @@ import (
 	"os"
 )
 
-type Configuration map[ServiceName]*Service
+type Configuration struct {
+	Nodes    []*NodeConfiguration
+	Services []*ServiceConfiguration
+}
 
 // NewConfiguration creates new Configuration by path or takes default if one does not exist
 func NewConfiguration(configPath string) (*Configuration, error) {
@@ -33,39 +36,54 @@ func NewConfiguration(configPath string) (*Configuration, error) {
 // DefaultConfiguration returns default Configuration
 func DefaultConfiguration() *Configuration {
 	def := &Configuration{
-		OrchestratorServiceName: {
-			URL: "localhost:6000",
-			Nodes: Nodes{
-				"orchestartor_1": {
-					Romote:           false,
-					StartImmediately: false,
-					OS:               "darwin",
-					HTTPAccess: []*HTTPAccess{
-						{
-							Address:    "http://localhost:6000/orchestrator/nodes/orchestrator",
-							Method:     "GET",
-							StatusCode: 200,
-						},
-						{
-							Address:    "http://localhost:6000/orchestrator/configuration/orchestrator",
-							Method:     "GET",
-							StatusCode: 200,
-						},
-						{
-							Address:    "http://localhost:6000/orchestrator/services/orchestrator",
-							Method:     "GET",
-							StatusCode: 200,
-						},
+		Nodes: []*NodeConfiguration{
+			{
+				Name:             "this",
+				OS:               "darwin",
+				StartImmediately: true,
+				Remote:           false,
+			},
+			{
+				Name:             "test",
+				OS:               "linux",
+				StartImmediately: true,
+				Remote:           true,
+				Connection: &Connection{
+					Host:   "0.0.0.0",
+					User:   "root",
+					SSHKey: "~/.ssh/my_key",
+				},
+			},
+		},
+		Services: []*ServiceConfiguration{
+			{
+				Name: "orchestrator",
+				URL:  "localhost:6000",
+				HTTPAccess: []*HTTPAccess{
+					{
+						Address:    "http://localhost:6000/orchestrator/nodes",
+						Method:     "GET",
+						StatusCode: 200,
 					},
-					Commands: Commands{
-						"start":  &Command{false, "launchctl load ~/Library/LaunchAgents/com.orchestrator.app.plist", ""},
-						"stop":   &Command{false, "launchctl unload ~/Library/LaunchAgents/com.orchestrator.app.plist", ""},
-						"status": &Command{true, "launchctl list | grep com.orchestrator.app", "-\t0\tcom.orchestrator.app\n"},
-					},
-					Settings: &Settings{
-						Timeout: 30,
+					{
+						Address:    "http://localhost:6000/orchestrator/services",
+						Method:     "GET",
+						StatusCode: 200,
 					},
 				},
+				Nodes: []string{"this"},
+			},
+			{
+				Name: "myuser",
+				URL:  "http://myuser.com.ua",
+				HTTPAccess: []*HTTPAccess{
+					{
+						Address:    "http://myuser.com.ua/api/v1/users",
+						Method:     "GET",
+						StatusCode: 200,
+					},
+				},
+				Nodes: []string{"test"},
 			},
 		},
 	}
@@ -78,18 +96,4 @@ func (config *Configuration) Save(configPath string) error {
 		return err
 	}
 	return ioutil.WriteFile(configPath, a, os.ModePerm)
-}
-
-func (config *Configuration) Valid() bool {
-	srv := *config
-	_, ok := srv[OrchestratorServiceName]
-	if !ok {
-		return false
-	}
-	for _, node := range srv[OrchestratorServiceName].Nodes {
-		if node.Romote {
-			return false
-		}
-	}
-	return true
 }

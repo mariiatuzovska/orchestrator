@@ -20,7 +20,7 @@ func main() {
 			Usage:       "Start",
 			Description: "Strats service",
 			Action: func(c *cli.Context) error {
-				config, err := orch.NewConfiguration(c.String("c"))
+				config, err := orch.NewConfiguration(c.String("config"))
 				if err != nil {
 					log.Fatal(err)
 				}
@@ -32,7 +32,7 @@ func main() {
 			},
 			Flags: []cli.Flag{
 				&cli.StringFlag{
-					Name:  "c",
+					Name:  "config",
 					Usage: "Path to configuration file",
 					Value: "./config.json",
 				},

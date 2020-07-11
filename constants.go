@@ -1,22 +1,24 @@
 package orchestrator
 
 const (
-	StatusInitialized StatusValue = "Initialized"
-	StatusRunning     StatusValue = "Running"
-	StatusStopped     StatusValue = "Stopped"
-	StatusFailed      StatusValue = "Failed"
-	StatusPassed      StatusValue = "Passed"
-	StatusUnknown     StatusValue = "Unknown"
-
-	SettingValueNever     SettingValue = "Never"
-	SettingValueNow       SettingValue = "Now"
-	SettingValueOnFailure SettingValue = "OnFailure"
-)
-
-const (
 	OSLinux   = "linux"
 	OSWindows = "windows"
 	OSDarwin  = "darwin"
+
+	NameOfThisNode = "this"
+
+	LinuxTryIsActiveFormatString   = "systemctl is-active %s --quiet; echo $?" // + ServiceConfiguration.Name
+	DarwinTryIsActiveFormatString  = "launchctl status | grep %s"              // + ServiceConfiguration.Name
+	WindowsTryIsActiveFormatString = ""
+
+	LinuxStartServiceFormatString  = "systemctl start %s" // + ServiceConfiguration.Name
+	DarwinStartServiceFormatString = "launchctl load %s"  // + ServiceConfiguration.Name
+
+	LinuxStopServiceFormatString  = "systemctl stop %s"   // + ServiceConfiguration.Name
+	DarwinStopServiceFormatString = "launchctl unload %s" // + ServiceConfiguration.Name
+
+	StatusActive   = "active"
+	StatusInActive = "in-active"
 )
 
 var HttpMethodMap = map[string]bool{
@@ -26,11 +28,3 @@ var HttpMethodMap = map[string]bool{
 	"PATCH":  true,
 	"DELETE": true,
 }
-
-var SettingValueMap = map[SettingValue]bool{
-	SettingValueNever:     true,
-	SettingValueNow:       true,
-	SettingValueOnFailure: true,
-}
-
-var DefaultTimeout = 300 // seconds

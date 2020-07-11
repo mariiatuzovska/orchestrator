@@ -1,136 +1,168 @@
 package orchestrator
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"
 )
 
 var (
-	OrchestratorServiceName ServiceName = "orchestrator"
-	Version                             = "0.0.1"
+	OrchestratorServiceName string = "orchestrator"
+	Version                        = "0.0.2"
 )
 
 type Orchestrator struct {
-	service    Configuration
-	status     map[ServiceName]ServiceStatus
-	nodestatus NodeStatus
-	event      chan Event
+	config       *Configuration
+	nodes        map[string]*Node
+	services     map[string]*Service
+	statusdetail map[string]*StatusDetail
 }
 
 type Event struct {
-	Name   NodeName
-	Status *Status
+	ServiceName string
+	Status      StatusDetail
 }
+
+type StatusDetail map[string]string
 
 func NewOrchestrator(config *Configuration) (*Orchestrator, error) {
-	if !config.Valid() {
-		return nil, errors.New("Orchestrator: configuration file is not valid")
-	}
-	o := &Orchestrator{*config, make(map[ServiceName]ServiceStatus), make(NodeStatus), make(chan Event, 100)}
-	for srvName, srv := range *config {
-		if _, exist := o.status[srvName]; exist {
-			return nil, fmt.Errorf("Orchestrator: service %s is not unique / already defined", srvName)
+	nodeMap, srvMap := make(map[string]*Node), make(map[string]*Service)
+	for _, nodConfig := range config.Nodes {
+		node, err := NewNode(nodConfig)
+		if err != nil {
+			return nil, err
 		}
-		o.status[srvName] = ServiceStatus{srv.URL, make(map[NodeName]StatusValue)}
-		for name, node := range srv.Nodes {
-			if err := node.valid(); err != nil {
-				return nil, fmt.Errorf("Orchestrator: %s: %s", name, err.Error())
-			}
-			if _, exist := o.nodestatus[name]; exist {
-				return nil, fmt.Errorf("Orchestrator: node %s is not unique / already defined", name)
-			}
-			srv.Nodes[name].Alive = false
-			o.nodestatus[name] = NewStatusInitialized()
-			o.status[srvName].NodeStatuses[name] = o.nodestatus[name].GeneralStatus
+		if _, exist := nodeMap[node.Name]; exist {
+			return nil, fmt.Errorf("Orchestrator: node %s is not unique / already defined", node.Name)
 		}
+		nodeMap[node.Name] = node
 	}
-	o.UpdateServiceStatus()
-	return o, nil
-}
-
-func (o *Orchestrator) UpdateServiceStatus() {
-	for srvName, srv := range o.service {
-		for name := range srv.Nodes {
-			o.status[srvName].NodeStatuses[name] = o.nodestatus[name].GeneralStatus
+	for _, srvConfig := range config.Services {
+		srv, err := NewService(srvConfig, nodeMap)
+		if err != nil {
+			return nil, err
 		}
+		if _, exist := nodeMap[srv.Name]; exist {
+			return nil, fmt.Errorf("Orchestrator: service %s is not unique / already defined", srv.Name)
+		}
+		srvMap[srv.Name] = srv
 	}
+	return &Orchestrator{config, nodeMap, srvMap, make(map[string]*StatusDetail)}, nil
 }
 
 func (o *Orchestrator) Start() error {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
+	type nodResponse struct {
+		IsConnected bool
+		Error       error
+	}
 	e.GET("/orchestrator/configuration", func(c echo.Context) error {
-		return c.JSON(http.StatusOK, o.service)
+		return c.JSON(http.StatusOK, o.config)
 	})
-	e.GET("/orchestrator/configuration/:name", func(c echo.Context) error {
+	e.GET("/orchestrator/configuration/services", func(c echo.Context) error {
+		return c.JSON(http.StatusOK, o.config.Services)
+	})
+	e.GET("/orchestrator/configuration/nodes", func(c echo.Context) error {
+		return c.JSON(http.StatusOK, o.config.Nodes)
+	})
+	e.GET("/orchestrator/configuration/services/:name", func(c echo.Context) error {
 		name := c.ParamValues()
 		if len(name) != 1 {
 			return c.NoContent(http.StatusBadRequest)
 		}
-		srv, ok := o.service[ServiceName(name[0])]
+		srv, ok := o.services[name[0]]
 		if !ok {
 			return c.NoContent(http.StatusBadRequest)
 		}
-		return c.JSON(http.StatusOK, srv)
+		return c.JSON(http.StatusOK, srv.ServiceConfiguration)
+	})
+	e.GET("/orchestrator/configuration/nodes/:name", func(c echo.Context) error {
+		name := c.ParamValues()
+		if len(name) != 1 {
+			return c.NoContent(http.StatusBadRequest)
+		}
+		node, ok := o.nodes[name[0]]
+		if !ok {
+			return c.NoContent(http.StatusBadRequest)
+		}
+		return c.JSON(http.StatusOK, node.NodeConfiguration)
 	})
 	e.GET("/orchestrator/services", func(c echo.Context) error {
-		return c.JSON(http.StatusOK, o.status)
+		return c.JSON(http.StatusOK, o.statusdetail)
 	})
 	e.GET("/orchestrator/services/:name", func(c echo.Context) error {
 		name := c.ParamValues()
 		if len(name) != 1 {
 			return c.NoContent(http.StatusBadRequest)
 		}
-		srv, ok := o.status[ServiceName(name[0])]
+		d, ok := o.statusdetail[name[0]]
 		if !ok {
 			return c.NoContent(http.StatusBadRequest)
 		}
-		return c.JSON(http.StatusOK, srv)
+		return c.JSON(http.StatusOK, d)
 	})
 	e.GET("/orchestrator/nodes", func(c echo.Context) error {
-		return c.JSON(http.StatusOK, o.nodestatus)
+		m := make(map[string]nodResponse)
+		for nodName, node := range o.nodes {
+			con, err := node.IsConnected()
+			m[nodName] = nodResponse{con, err}
+		}
+		return c.JSON(http.StatusOK, m)
 	})
 	e.GET("/orchestrator/nodes/:name", func(c echo.Context) error {
 		name := c.ParamValues()
 		if len(name) != 1 {
 			return c.NoContent(http.StatusBadRequest)
 		}
-		nod, ok := o.nodestatus[NodeName(name[0])]
+		node, ok := o.nodes[name[0]]
 		if !ok {
 			return c.NoContent(http.StatusBadRequest)
 		}
-		return c.JSON(http.StatusOK, nod)
+		con, err := node.IsConnected()
+		return c.JSON(http.StatusOK, nodResponse{con, err})
 	})
 	go o.Go()
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		ExposeHeaders:    []string{"Server", "Content-Type", "Content-Disposition"},
 		AllowCredentials: true,
 	}))
-	return e.Start(o.service[OrchestratorServiceName].URL)
+	return e.Start(o.services[OrchestratorServiceName].URL)
 }
 
-func (o *Orchestrator) Go() error {
-	for _, srv := range o.service {
-		for name, node := range srv.Nodes {
-			go node.Go(name, o.event)
-		}
+func (o *Orchestrator) Go() {
+	time.Sleep(time.Duration(3) * time.Second)
+	c := make(chan Event, 100)
+	for srvName, srv := range o.services {
+		go func(srvName string, srv *Service, c chan Event) {
+			for {
+				sd := make(StatusDetail)
+				for nodName, node := range srv.node {
+					err := node.ServiceStatus(srvName)
+					if err != nil {
+						sd[nodName] = err.Error()
+					} else {
+						sd[nodName] = StatusActive
+					}
+				}
+				c <- Event{srvName, sd}
+				if srv.Timeout <= 0 {
+					break
+				}
+				time.Sleep(time.Duration(srv.Timeout) * time.Second)
+			}
+		}(srvName, srv, c)
 	}
 	for {
-		e := <-o.event
-		_, ok := o.nodestatus[e.Name]
-		if !ok {
-			return errors.New("Orchestrator: undefined node")
-		}
-		o.nodestatus[e.Name] = e.Status
-		o.UpdateServiceStatus()
+		e := <-c
+		o.statusdetail[e.ServiceName] = &e.Status
 	}
 }
 
-func (o *Orchestrator) Stop() error {
-	return nil
-}
+// func (o *Orchestrator) Stop() error {
+// 	return nil
+// }

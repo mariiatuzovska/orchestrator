@@ -3,200 +3,205 @@ package orchestrator
 import (
 	"errors"
 	"fmt"
-	"net/http"
-	"net/url"
+	"os"
 	"os/exec"
-	"time"
+	"strings"
 
 	ssh "github.com/melbahja/goph"
 )
 
 type Node struct {
-	Alive            bool   // is node alive
-	StartImmediately bool   // starts node immediately
-	Romote           bool   // Local / Remote
+	*NodeConfiguration
+	isConnected bool        // is connection ok
+	client      *ssh.Client // ssh client
+}
+
+type NodeConfiguration struct {
+	Name             string
 	OS               string // linux / darwin / windows
+	StartImmediately bool   // starts node immediately
+	Remote           bool   // Local / Remote
 	Connection       *Connection
-	Commands         Commands
-	HTTPAccess       []*HTTPAccess // http access settings
-	Settings         *Settings
 }
 
 type Connection struct {
-	Address    string
+	Host       string
+	Port       string
 	User       string
 	SSHKey     string // SSHKey is a path to private key (client key)
 	PassPhrase string
 }
 
-// HTTPAccess smth like in consul config
-type HTTPAccess struct {
-	Method     string
-	Address    string
-	StatusCode int
-	Headers    map[string]string
+func NewNode(config *NodeConfiguration) (*Node, error) {
+	node := &Node{config, false, nil}
+	if err := node.Valid(); err != nil {
+		return nil, err
+	}
+	return node, nil
 }
 
-type Commands map[CommandName]*Command
-
-type CommandName string
-
-type Command struct {
-	GetStatus bool
-	Stdin     string
-	Stdout    string
-}
-
-type SettingValue string
-
-type Settings struct {
-	Restart SettingValue // default = never
-	Reload  SettingValue // default = never
-	Timeout int
-}
-
-// NodeName is a {ServiceName}_{NodeKey}
-type NodeName string
-
-type NodeStatus map[NodeName]*Status
-
-// Nodes is a map NodeName : Node
-type Nodes map[NodeName]*Node
-
-func (n *Node) CommandExist(command CommandName) bool {
-	_, ok := n.Commands[command]
-	return ok
-}
-
-func (n *Node) Status() *Status {
-	status := NewStatusFailed("")
-	for _, aMethod := range n.HTTPAccess {
-		err := aMethod.do()
+func (n *Node) Connect() (err error) {
+	if n.Remote {
+		server := fmt.Sprintf("%s:%s", n.Connection.Host, n.Connection.Port)
+		n.client, err = ssh.New(n.Connection.User, server, ssh.Key(n.Connection.SSHKey, n.Connection.PassPhrase))
 		if err != nil {
-			n.Alive = false
-			status.Error = err.Error()
-			status.SetListStatus("HTTPAccess", StatusFailed)
-			return status
+			return err
 		}
-		status.SetListStatus("HTTPAccess", StatusPassed)
+		return
 	}
-	if n.Commands != nil {
-		for name, command := range n.Commands {
-			if command.GetStatus {
-				out, err := n.run(command.Stdin)
-				if err != nil {
-					n.Alive = false
-					status.Error = err.Error()
-					status.SetListStatus(name, StatusFailed)
-					return status
-				}
-				if command.Stdout != "" && command.Stdout != out {
-					n.Alive = false
-					status.SetListStatus(name, StatusFailed)
-					return status
-				} else if command.Stdout == "" {
-					status.SetListStatus(name, StatusValue(out))
-				} else {
-					status.SetListStatus(name, StatusPassed)
-				}
-			}
-		}
-	}
-	status.GeneralStatus = StatusRunning
-	n.Alive = true
-	return status
+	return fmt.Errorf("%s node is configured as local", n.Name)
 }
 
-func (n *Node) Go(name NodeName, event chan Event) error {
-	for {
-		if n.Settings.Timeout <= 0 {
-			event <- Event{name, n.Status()}
-			break
+func (n *Node) Disconnect() error {
+	if n.Remote {
+		return n.client.Close()
+	}
+	return fmt.Errorf("%s node is configured as local", n.Name)
+}
+
+func (n *Node) IsConnected() (bool, error) {
+	if n.Remote {
+		if n.client == nil {
+			n.isConnected = false
+			return false, fmt.Errorf("%s node has nil Connection", n.Name)
 		}
-		status, d := n.Status(), time.Duration(n.Settings.Timeout)*time.Second
-		status.NextUpdate = time.Now().Add(d).String()
-		event <- Event{name, status}
-		time.Sleep(d)
+		session, err := n.client.NewSession()
+		if err != nil {
+			n.isConnected = false
+			return false, err
+		}
+		err = session.Close()
+		if err != nil {
+			n.isConnected = false
+			return false, err
+		}
+	}
+	n.isConnected = true
+	return true, nil
+}
+
+func (n *Node) ServiceStatus(srvName string) error {
+	switch n.OS {
+	case OSDarwin: // only local
+		command := fmt.Sprintf(DarwinTryIsActiveFormatString, srvName)
+		out, err := n.runcommand(srvName, command)
+		if err != nil {
+			return err
+		}
+		if !strings.Contains(out, "-\t0\t") {
+			return fmt.Errorf("%s", StatusInActive)
+		}
+	case OSLinux: // local + remote
+		command := fmt.Sprintf(LinuxTryIsActiveFormatString, srvName)
+		out, err := n.runcommand(srvName, command)
+		if err != nil {
+			return err
+		}
+		if out != "0" {
+			return fmt.Errorf("%s", StatusInActive)
+		}
+	default:
+		return fmt.Errorf("Node error: unknown OS %s", n.OS)
 	}
 	return nil
 }
 
-func (n *Node) run(command string) (string, error) {
-	if n.Romote {
-		client, err := ssh.New(n.Connection.User, n.Connection.Address, ssh.Key(n.Connection.SSHKey, n.Connection.PassPhrase))
-		if err != nil {
-			return "", err
-		}
-		out, err := client.Run(command)
-		if err != nil {
-			return "", err
-		}
-		err = client.Close()
-		if err != nil {
-			return "", err
-		}
-		return string(out), nil
+func (n *Node) StartService(srvName string) error {
+	command := ""
+	switch n.OS {
+	case OSDarwin: // only local
+		command = fmt.Sprintf(DarwinStartServiceFormatString, srvName)
+	case OSLinux: // local + remote
+		command = fmt.Sprintf(LinuxStartServiceFormatString, srvName)
 	}
-	out, err := exec.Command("bash", "-c", command).Output() // works for darwin
+	_, err := n.runcommand(srvName, command)
+	return err
+}
+
+func (n *Node) StopService(srvName string) error {
+	command := ""
+	switch n.OS {
+	case OSDarwin: // only local
+		command = fmt.Sprintf(DarwinStopServiceFormatString, srvName)
+	case OSLinux: // local + remote
+		command = fmt.Sprintf(LinuxStopServiceFormatString, srvName)
+	}
+	_, err := n.runcommand(srvName, command)
+	return err
+}
+
+func (n *Node) runcommand(srvName, command string) (string, error) {
+	var out []byte
+	_, err := n.IsConnected()
 	if err != nil {
 		return "", err
+	}
+	switch n.OS {
+	case OSDarwin: // only local
+		if n.Remote {
+			return "", fmt.Errorf("Node error: remote access for OS %s is not provided", n.OS)
+		} else {
+			out, err = exec.Command("bash", "-c", command).Output()
+			if err != nil {
+				return "", err
+			}
+		}
+	case OSWindows: // no local, no remote
+		if n.Remote {
+			return "", fmt.Errorf("Node error: remote access for OS %s is not provided", n.OS)
+		} else {
+			return "", fmt.Errorf("Node error: local access for OS %s is not provided", n.OS)
+		}
+	case OSLinux: // local + remote
+		if n.Remote {
+			out, err = n.client.Run(command)
+			if err != nil {
+				return "", err
+			}
+		} else {
+			out, err = exec.Command("bash", "-c", command).Output()
+			if err != nil {
+				return "", err
+			}
+		}
+	default:
+		return "", fmt.Errorf("Node error: unknown OS %s", n.OS)
 	}
 	return string(out), nil
 }
 
-func (n *Node) valid() error {
-	for _, httpAccess := range n.HTTPAccess {
-		if err := httpAccess.valid(); err != nil {
-			return err
-		}
+func (n *Node) Valid() error {
+	if n.Name == "" {
+		return errors.New("Node validation: undefined Name")
 	}
 	if n.OS != OSDarwin && n.OS != OSLinux && n.OS != OSWindows {
 		return errors.New("Node validation: unknown OS")
 	}
-	if _, ok := SettingValueMap[n.Settings.Restart]; !ok {
-		n.Settings.Restart = "never"
-	}
-	if _, ok := SettingValueMap[n.Settings.Reload]; !ok {
-		n.Settings.Reload = "never"
-	}
-	if n.Settings.Timeout <= 0 {
-		n.Settings.Timeout = -1
-	}
-	return nil
-}
-
-func (h *HTTPAccess) valid() error {
-	_, ok := HttpMethodMap[h.Method]
-	if !ok {
-		return errors.New("HTTPAccess: unknown method")
-	}
-	_, err := url.ParseRequestURI(h.Address)
-	if err != nil {
-		return errors.New("HTTPAccess: can't parse url")
-	}
-	if h.StatusCode < 100 || h.StatusCode > 526 {
-		return errors.New("HTTPAccess: unknown status code")
-	}
-	return nil
-}
-
-func (h *HTTPAccess) do() error {
-	request, err := http.NewRequest(h.Method, h.Address, nil)
-	if err != nil {
-		return fmt.Errorf("HTTP access method: %s", err.Error())
-	}
-	if h.Headers != nil {
-		for key, value := range h.Headers {
-			request.Header.Set(key, value)
+	if n.Remote {
+		if n.Connection == nil {
+			return errors.New("Node validation: nil Connection for remote node")
+		}
+		if n.Connection.Host == "" {
+			return errors.New("Node validation: undefined Host")
+		}
+		if n.Connection.Port == "" {
+			n.Connection.Port = "22"
+		}
+		if n.Connection.User == "" {
+			return errors.New("Node validation: undefined User")
+		}
+		if n.Connection.SSHKey == "" {
+			return errors.New("Node validation: undefined SSHKey")
 		}
 	}
-	client := new(http.Client)
-	resp, err := client.Do(request)
-	if err != nil {
-		return fmt.Errorf("HTTP access method: %s", err.Error())
-	}
-	if resp.StatusCode != h.StatusCode {
-		return fmt.Errorf("HTTP access method: expected status code %d, got %d", h.StatusCode, resp.StatusCode)
-	}
 	return nil
+}
+
+func getThisNodeConfiguration() *NodeConfiguration {
+	return &NodeConfiguration{
+		Name:             NameOfThisNode,
+		OS:               os.Getenv("GOOS"),
+		StartImmediately: true,
+		Remote:           false,
+	}
 }
