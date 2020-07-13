@@ -9,17 +9,29 @@ import (
 
 type Service struct {
 	*ServiceConfiguration
-	status StatusDetail
+	status map[string]*StatusDetail
 	node   map[string]*Node
 }
 
-type ServiceConfiguration struct {
-	Name             string
+type ServiceInfo struct {
+	ServiceName      string
+	ServiceType      string
+	StatusDetail     *StatusDetail
 	URL              string
 	StartImmediately bool          // starts service immediately
 	HTTPAccess       []*HTTPAccess // http access settings
-	Nodes            []string      // array of node names
 	Timeout          int           // seconds
+	Nodes            []*NodeInfo
+}
+
+type ServiceConfiguration struct {
+	ServiceName      string
+	ServiceType      string
+	URL              string
+	StartImmediately bool          // starts service immediately
+	HTTPAccess       []*HTTPAccess // http access settings
+	Timeout          int           // seconds
+	Nodes            []string      // array of node names
 }
 
 // HTTPAccess smth like in consul config
@@ -30,8 +42,19 @@ type HTTPAccess struct {
 	Headers    map[string]string
 }
 
+type StatusDetail struct {
+	Active     bool
+	HTTPAccess string
+	Statuses   []*StatusInfo
+}
+
+type StatusInfo struct {
+	NodeName      string
+	ServiceStatus string
+}
+
 func NewService(config *ServiceConfiguration, nodes map[string]*Node) (*Service, error) {
-	s := &Service{config, make(StatusDetail), make(map[string]*Node)}
+	s := &Service{config, make(map[string]*StatusDetail), make(map[string]*Node)}
 	for _, nodName := range config.Nodes {
 		if node, ok := nodes[nodName]; ok {
 			s.node[nodName] = node
@@ -40,74 +63,54 @@ func NewService(config *ServiceConfiguration, nodes map[string]*Node) (*Service,
 	return s, s.Valid()
 }
 
-func (s *Service) Start() error {
-	return nil
-}
-
-func (s *Service) Stop() error {
-	return nil
-}
-
-func (s *Service) Status() (*StatusDetail, error) {
-	return &StatusDetail{}, nil
-}
-
-// func (n *Node) Go(name NodeName, event chan Event) error {
-// 	for {
-// 		if n.Settings.Timeout <= 0 {
-// 			event <- Event{name, n.Status()}
-// 			break
-// 		}
-// 		status, d := n.Status(), time.Duration(n.Settings.Timeout)*time.Second
-// 		status.NextUpdate = time.Now().Add(d).String()
-// 		event <- Event{name, status}
-// 		time.Sleep(d)
-// 	}
+// func (s *Service) Start() error {
 // 	return nil
 // }
 
-// func (n *Node) Run(command CommandName) (string, error) {
-// 	if !n.CommandExist(command) {
-// 		return "", fmt.Errorf("%s command is not exist in current node", command)
-// 	}
-// 	out, err := n.run(n.Commands[command].Stdin)
-// 	if err != nil {
-// 		return "", err
-// 	}
-// 	return out, nil
+// func (s *Service) Stop() error {
+// 	return nil
 // }
 
-// func (n *Node) run(command string) (string, error) {
-// 	if n.Romote {
-// 		client, err := ssh.New(n.Connection.User, n.Connection.Address, ssh.Key(n.Connection.SSHKey, n.Connection.PassPhrase))
-// 		if err != nil {
-// 			return "", err
-// 		}
-// 		out, err := client.Run(command)
-// 		if err != nil {
-// 			return "", err
-// 		}
-// 		err = client.Close()
-// 		if err != nil {
-// 			return "", err
-// 		}
-// 		return string(out), nil
-// 	}
-// 	out, err := exec.Command("bash", "-c", command).Output() // works for darwin
-// 	if err != nil {
-// 		return "", err
-// 	}
-// 	return string(out), nil
-// }
+func (s *Service) Status() *StatusDetail {
+	sd := &StatusDetail{false, HTTPAccessStatusUndefined, make([]*StatusInfo, 0)}
+	for _, access := range s.HTTPAccess {
+		err := access.do()
+		if err != nil {
+			sd.HTTPAccess = err.Error()
+		} else {
+			sd.Active = true
+			sd.HTTPAccess = HTTPAccessStatusPassed
+		}
+	}
+	for nodName, node := range s.node {
+		err := node.ServiceStatus(s.ServiceName)
+		if err != nil {
+			sd.Statuses = append(sd.Statuses, &StatusInfo{nodName, err.Error()})
+		} else {
+			sd.Active = true
+			sd.Statuses = append(sd.Statuses, &StatusInfo{nodName, StatusActive})
+		}
+	}
+	return sd
+}
 
 func (s *Service) Valid() error {
+	if s.ServiceName == "" {
+		return fmt.Errorf("Service validation: undefined service name")
+	}
+	if s.ServiceType == "" {
+		return fmt.Errorf("Service validation: %s service has undefined service type", s.ServiceName)
+	}
+	if len(s.Nodes) < 1 {
+		return fmt.Errorf("Service validation: %s service must include node(s)", s.ServiceName)
+	}
 	for _, nodeName := range s.Nodes {
 		node, ok := s.node[nodeName]
 		if !ok {
-			return fmt.Errorf("%s node is not defined", nodeName)
+			return fmt.Errorf("Service validation: %s node is not defined for %s service", nodeName, s.ServiceName)
 		}
 		if err := node.Valid(); err != nil {
-			return err
+			return fmt.Errorf("Service validation: %s node is not valid: %s", nodeName, err.Error())
 		}
 	}
 	for _, hAccess := range s.HTTPAccess {

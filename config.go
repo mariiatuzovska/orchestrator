@@ -38,13 +38,13 @@ func DefaultConfiguration() *Configuration {
 	def := &Configuration{
 		Nodes: []*NodeConfiguration{
 			{
-				Name:             "this",
+				NodeName:         "this",
 				OS:               "darwin",
 				StartImmediately: true,
 				Remote:           false,
 			},
 			{
-				Name:             "test",
+				NodeName:         "test",
 				OS:               "linux",
 				StartImmediately: true,
 				Remote:           true,
@@ -57,8 +57,8 @@ func DefaultConfiguration() *Configuration {
 		},
 		Services: []*ServiceConfiguration{
 			{
-				Name: "orchestrator",
-				URL:  "localhost:6000",
+				ServiceName: "orchestrator",
+				URL:         "localhost:6000",
 				HTTPAccess: []*HTTPAccess{
 					{
 						Address:    "http://localhost:6000/orchestrator/nodes",
@@ -74,8 +74,8 @@ func DefaultConfiguration() *Configuration {
 				Nodes: []string{"this"},
 			},
 			{
-				Name: "myuser",
-				URL:  "http://myuser.com.ua",
+				ServiceName: "myuser",
+				URL:         "http://myuser.com.ua",
 				HTTPAccess: []*HTTPAccess{
 					{
 						Address:    "http://myuser.com.ua/api/v1/users",

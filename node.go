@@ -16,8 +16,18 @@ type Node struct {
 	client      *ssh.Client // ssh client
 }
 
+type NodeInfo struct {
+	Connected bool
+	*NodeConfiguration
+}
+
+type NodeInfoResponse struct {
+	IsConnected bool
+	Error       string
+}
+
 type NodeConfiguration struct {
-	Name             string
+	NodeName         string
 	OS               string // linux / darwin / windows
 	StartImmediately bool   // starts node immediately
 	Remote           bool   // Local / Remote
@@ -49,21 +59,21 @@ func (n *Node) Connect() (err error) {
 		}
 		return
 	}
-	return fmt.Errorf("%s node is configured as local", n.Name)
+	return fmt.Errorf("%s node is configured as local", n.NodeName)
 }
 
 func (n *Node) Disconnect() error {
 	if n.Remote {
 		return n.client.Close()
 	}
-	return fmt.Errorf("%s node is configured as local", n.Name)
+	return fmt.Errorf("%s node is configured as local", n.NodeName)
 }
 
 func (n *Node) IsConnected() (bool, error) {
 	if n.Remote {
 		if n.client == nil {
 			n.isConnected = false
-			return false, fmt.Errorf("%s node has nil Connection", n.Name)
+			return false, fmt.Errorf("%s node has nil Connection", n.NodeName)
 		}
 		session, err := n.client.NewSession()
 		if err != nil {
@@ -88,8 +98,8 @@ func (n *Node) ServiceStatus(srvName string) error {
 		if err != nil {
 			return err
 		}
-		if !strings.Contains(out, "-\t0\t") {
-			return fmt.Errorf("%s", StatusInActive)
+		if !strings.Contains(out, "0") {
+			return fmt.Errorf("%s", StatusInactive)
 		}
 	case OSLinux: // local + remote
 		command := fmt.Sprintf(LinuxTryIsActiveFormatString, srvName)
@@ -97,8 +107,8 @@ func (n *Node) ServiceStatus(srvName string) error {
 		if err != nil {
 			return err
 		}
-		if out != "0" {
-			return fmt.Errorf("%s", StatusInActive)
+		if !strings.Contains(out, "0") {
+			return fmt.Errorf("%s", StatusInactive)
 		}
 	default:
 		return fmt.Errorf("Node error: unknown OS %s", n.OS)
@@ -171,7 +181,7 @@ func (n *Node) runcommand(srvName, command string) (string, error) {
 }
 
 func (n *Node) Valid() error {
-	if n.Name == "" {
+	if n.NodeName == "" {
 		return errors.New("Node validation: undefined Name")
 	}
 	if n.OS != OSDarwin && n.OS != OSLinux && n.OS != OSWindows {
@@ -199,7 +209,7 @@ func (n *Node) Valid() error {
 
 func getThisNodeConfiguration() *NodeConfiguration {
 	return &NodeConfiguration{
-		Name:             NameOfThisNode,
+		NodeName:         NameOfThisNode,
 		OS:               os.Getenv("GOOS"),
 		StartImmediately: true,
 		Remote:           false,
