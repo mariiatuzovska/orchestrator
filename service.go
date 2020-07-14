@@ -8,30 +8,34 @@ import (
 )
 
 type Service struct {
-	*ServiceConfiguration
-	status map[string]*StatusDetail
-	node   map[string]*Node
+	ServiceInfo
+	StatusInfo ServiceStatusInfo
+	Nodes      []*Node
 }
 
 type ServiceInfo struct {
 	ServiceName      string
 	ServiceType      string
-	StatusDetail     *StatusDetail
 	URL              string
 	StartImmediately bool          // starts service immediately
 	HTTPAccess       []*HTTPAccess // http access settings
 	Timeout          int           // seconds
-	Nodes            []*NodeInfo
 }
 
 type ServiceConfiguration struct {
-	ServiceName      string
-	ServiceType      string
-	URL              string
-	StartImmediately bool          // starts service immediately
-	HTTPAccess       []*HTTPAccess // http access settings
-	Timeout          int           // seconds
-	Nodes            []string      // array of node names
+	ServiceInfo
+	NodeNames []string // array of node names
+}
+
+type ServiceStatusInfo struct {
+	ServiceStatus    int
+	HTTPAccessStatus int
+	NodeStatus       []*NodeStatusInfo
+}
+
+type NodeStatusInfo struct {
+	NodeName string
+	Status   int
 }
 
 // HTTPAccess smth like in consul config
@@ -54,44 +58,14 @@ type StatusInfo struct {
 }
 
 func NewService(config *ServiceConfiguration, nodes map[string]*Node) (*Service, error) {
-	s := &Service{config, make(map[string]*StatusDetail), make(map[string]*Node)}
-	for _, nodName := range config.Nodes {
+	s := &Service{config.ServiceInfo, ServiceStatusInfo{StatusInitialized, StatusInitialized, make([]*NodeStatusInfo, 0)}, make([]*Node, 0)}
+	for _, nodName := range config.NodeNames {
 		if node, ok := nodes[nodName]; ok {
-			s.node[nodName] = node
+			s.Nodes = append(s.Nodes, node)
+			s.StatusInfo.NodeStatus = append(s.StatusInfo.NodeStatus, &NodeStatusInfo{node.NodeName, StatusInitialized})
 		}
 	}
 	return s, s.Valid()
-}
-
-// func (s *Service) Start() error {
-// 	return nil
-// }
-
-// func (s *Service) Stop() error {
-// 	return nil
-// }
-
-func (s *Service) Status() *StatusDetail {
-	sd := &StatusDetail{false, HTTPAccessStatusUndefined, make([]*StatusInfo, 0)}
-	for _, access := range s.HTTPAccess {
-		err := access.do()
-		if err != nil {
-			sd.HTTPAccess = err.Error()
-		} else {
-			sd.Active = true
-			sd.HTTPAccess = HTTPAccessStatusPassed
-		}
-	}
-	for nodName, node := range s.node {
-		err := node.ServiceStatus(s.ServiceName)
-		if err != nil {
-			sd.Statuses = append(sd.Statuses, &StatusInfo{nodName, err.Error()})
-		} else {
-			sd.Active = true
-			sd.Statuses = append(sd.Statuses, &StatusInfo{nodName, StatusActive})
-		}
-	}
-	return sd
 }
 
 func (s *Service) Valid() error {
@@ -104,13 +78,9 @@ func (s *Service) Valid() error {
 	if len(s.Nodes) < 1 {
 		return fmt.Errorf("Service validation: %s service must include node(s)", s.ServiceName)
 	}
-	for _, nodeName := range s.Nodes {
-		node, ok := s.node[nodeName]
-		if !ok {
-			return fmt.Errorf("Service validation: %s node is not defined for %s service", nodeName, s.ServiceName)
-		}
+	for _, node := range s.Nodes {
 		if err := node.Valid(); err != nil {
-			return fmt.Errorf("Service validation: %s node is not valid: %s", nodeName, err.Error())
+			return fmt.Errorf("Service validation: %s node is not valid: %s", node.NodeName, err.Error)
 		}
 	}
 	for _, hAccess := range s.HTTPAccess {

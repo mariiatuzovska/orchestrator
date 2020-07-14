@@ -11,5 +11,6 @@ require (
 	github.com/progrium/go-shell v0.0.0-20181023041501-104b11941186
 	github.com/stretchr/testify v1.4.0
 	github.com/urfave/cli v1.22.4
-	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9 // indirect
+	golang.org/x/crypto v0.0.0-20200709230013-948cd5f35899
+	golang.org/x/sys v0.0.0-20200625212154-ddb9806d33ae // indirect
 )

@@ -20,21 +20,42 @@ func main() {
 			Usage:       "Start",
 			Description: "Strats service",
 			Action: func(c *cli.Context) error {
-				config, err := orch.NewConfiguration(c.String("config"))
+				services, err := orch.NewServiceConfigurationArray(c.String("sc"))
 				if err != nil {
 					log.Fatal(err)
 				}
-				o, err := orch.NewOrchestrator(config)
+				nodes, err := orch.NewNodeConfigurationArray(c.String("nc"))
 				if err != nil {
 					log.Fatal(err)
 				}
-				return o.Start()
+				o, err := orch.NewOrchestrator(&orch.Configuration{
+					c.String("sc"), c.String("nc"), services, nodes,
+				})
+				if err != nil {
+					log.Fatal(err)
+				}
+				return o.StartOrchestrator(c.String("host") + ":" + c.String("port"))
 			},
 			Flags: []cli.Flag{
 				&cli.StringFlag{
-					Name:  "config",
-					Usage: "Path to configuration file",
-					Value: "./config.json",
+					Name:  "sc",
+					Usage: "Path to services configuration file",
+					Value: "./service-configuration.json",
+				},
+				&cli.StringFlag{
+					Name:  "nc",
+					Usage: "Path to nodes configuration file",
+					Value: "./node-configuration.json",
+				},
+				&cli.StringFlag{
+					Name:  "host",
+					Usage: "Host",
+					Value: "127.0.0.1",
+				},
+				&cli.StringFlag{
+					Name:  "port",
+					Usage: "Port",
+					Value: "6000",
 				},
 			},
 		},

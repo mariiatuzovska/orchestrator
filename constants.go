@@ -1,5 +1,20 @@
 package orchestrator
 
+// STATUSES
+const (
+	StatusInitialized   = -1
+	StatusActive        = 0
+	StatusConnected     = 0
+	StatusPassed        = 0
+	StatusInactive      = 1
+	StatusDisconnected  = 1
+	StatusFailed        = 1
+	StatusNilConnection = 2
+	StatusUnknownNode   = 2
+	StatusUnknownOS     = 2
+	StatusUndefined     = -2
+)
+
 const (
 	OrchestratorServiceType = "orchestrator"
 
@@ -9,21 +24,15 @@ const (
 
 	NameOfThisNode = "this"
 
-	LinuxTryIsActiveFormatString   = "systemctl is-active %s --quiet; echo $?" // + ServiceConfiguration.Name
-	DarwinTryIsActiveFormatString  = "launchctl list | grep %s"                // + ServiceConfiguration.Name
+	LinuxTryIsActiveFormatString   = "systemctl is-active %s --quiet; echo $?" // + ServiceConfiguration.ServiceName
+	DarwinTryIsActiveFormatString  = "launchctl list | grep %s"                // + ServiceConfiguration.ServiceName
 	WindowsTryIsActiveFormatString = ""
 
-	LinuxStartServiceFormatString  = "systemctl start %s" // + ServiceConfiguration.Name
-	DarwinStartServiceFormatString = "launchctl load %s"  // + ServiceConfiguration.Name
+	LinuxStartServiceFormatString  = "systemctl start %s" // + ServiceConfiguration.ServiceName
+	DarwinStartServiceFormatString = "launchctl load %s"  // + ServiceConfiguration.ServiceName
 
-	LinuxStopServiceFormatString  = "systemctl stop %s"   // + ServiceConfiguration.Name
-	DarwinStopServiceFormatString = "launchctl unload %s" // + ServiceConfiguration.Name
-
-	StatusActive   = "active"
-	StatusInactive = "inactive"
-
-	HTTPAccessStatusUndefined = "undefined"
-	HTTPAccessStatusPassed    = "passed"
+	LinuxStopServiceFormatString  = "systemctl stop %s"   // + ServiceConfiguration.ServiceName
+	DarwinStopServiceFormatString = "launchctl unload %s" // + ServiceConfiguration.ServiceName
 )
 
 var HttpMethodMap = map[string]bool{
