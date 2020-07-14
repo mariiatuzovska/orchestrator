@@ -61,13 +61,6 @@ func (n *Node) Connect() (*ssh.Client, error) {
 	return client, nil
 }
 
-// func (n *Node) Disconnect() error {
-// 	if n.Remote {
-// 		return n.client.Close()
-// 	}
-// 	return fmt.Errorf("Node access: %s node is configured as local", n.NodeName)
-// }
-
 func (n *Node) Valid() error {
 	if n.NodeName == "" {
 		return errors.New("Node validation: undefined Name")
@@ -94,12 +87,3 @@ func (n *Node) Valid() error {
 	}
 	return nil
 }
-
-// func getThisNodeConfiguration() *NodeConfiguration {
-// 	return &NodeConfiguration{
-// 		NodeName:         NameOfThisNode,
-// 		OS:               os.Getenv("GOOS"),
-// 		StartImmediately: true,
-// 		Remote:           false,
-// 	}
-// }

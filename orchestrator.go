@@ -177,8 +177,16 @@ func (o *Orchestrator) ServiceStatus(service string) (*ServiceStatusInfo, error)
 		switch node.OS {
 		case OSWindows:
 			nodStatus.Status = StatusUnknownOS
-		default:
+		case OSLinux:
 			command := fmt.Sprintf(LinuxTryIsActiveFormatString, service)
+			out, err := o.runcommand(node.NodeName, command)
+			if err != nil {
+				nodStatus.Status = StatusDisconnected
+			} else if !strings.Contains(out, "0") {
+				nodStatus.Status = StatusInactive
+			}
+		case OSDarwin:
+			command := fmt.Sprintf(DarwinTryIsActiveFormatString, service)
 			out, err := o.runcommand(node.NodeName, command)
 			if err != nil {
 				nodStatus.Status = StatusDisconnected
@@ -200,9 +208,9 @@ func (o *Orchestrator) StartService(node, service string) error {
 		return fmt.Errorf("Node access: %s node is unknown", node)
 	}
 	switch o.nodes[node].OS {
-	case OSDarwin: // only local
+	case OSDarwin:
 		command = fmt.Sprintf(DarwinStartServiceFormatString, service)
-	case OSLinux: // local + remote
+	case OSLinux:
 		command = fmt.Sprintf(LinuxStartServiceFormatString, service)
 	}
 	_, err := o.runcommand(node, command)
@@ -215,9 +223,9 @@ func (o *Orchestrator) StopService(node, service string) error {
 		return fmt.Errorf("Node access: %s node is unknown", node)
 	}
 	switch o.nodes[node].OS {
-	case OSDarwin: // only local
+	case OSDarwin:
 		command = fmt.Sprintf(DarwinStopServiceFormatString, service)
-	case OSLinux: // local + remote
+	case OSLinux:
 		command = fmt.Sprintf(LinuxStopServiceFormatString, service)
 	}
 	_, err := o.runcommand(node, command)
