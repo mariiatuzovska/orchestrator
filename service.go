@@ -31,11 +31,13 @@ type ServiceStatusInfo struct {
 	ServiceStatus    int
 	HTTPAccessStatus int
 	NodeStatus       []*NodeStatusInfo
+	ThisUpdate       string
+	NextUpdate       string
 }
 
 type NodeStatusInfo struct {
-	NodeName string
-	Status   int
+	NodeName      string
+	ServiceStatus int
 }
 
 // HTTPAccess smth like in consul config
@@ -58,7 +60,7 @@ type StatusInfo struct {
 }
 
 func NewService(config *ServiceConfiguration, nodes map[string]*Node) (*Service, error) {
-	s := &Service{config.ServiceInfo, ServiceStatusInfo{StatusInitialized, StatusInitialized, make([]*NodeStatusInfo, 0)}, make([]*Node, 0)}
+	s := &Service{config.ServiceInfo, ServiceStatusInfo{StatusInitialized, StatusInitialized, make([]*NodeStatusInfo, 0), "", ""}, make([]*Node, 0)}
 	for _, nodName := range config.NodeNames {
 		if node, ok := nodes[nodName]; ok {
 			s.Nodes = append(s.Nodes, node)
@@ -76,11 +78,14 @@ func (s *Service) Valid() error {
 		return fmt.Errorf("Service validation: %s service has undefined service type", s.ServiceName)
 	}
 	if len(s.Nodes) < 1 {
-		return fmt.Errorf("Service validation: %s service must include node(s)", s.ServiceName)
+		return fmt.Errorf("Service validation: %s service must include existing node(s)", s.ServiceName)
+	}
+	if s.Timeout <= 0 {
+		s.Timeout = -1
 	}
 	for _, node := range s.Nodes {
 		if err := node.Valid(); err != nil {
-			return fmt.Errorf("Service validation: %s node is not valid: %s", node.NodeName, err.Error)
+			return fmt.Errorf("Service validation: %s node is not valid: %s", node.NodeName, err.Error())
 		}
 	}
 	for _, hAccess := range s.HTTPAccess {
@@ -94,14 +99,14 @@ func (s *Service) Valid() error {
 func (h *HTTPAccess) valid() error {
 	_, ok := HttpMethodMap[h.Method]
 	if !ok {
-		return errors.New("HTTPAccess: unknown method")
+		return errors.New("HTTPAccess validation: unknown method")
 	}
 	_, err := url.ParseRequestURI(h.Address)
 	if err != nil {
-		return errors.New("HTTPAccess: can't parse url")
+		return errors.New("HTTPAccess validation: can't parse url")
 	}
 	if h.StatusCode < 100 || h.StatusCode > 526 {
-		return errors.New("HTTPAccess: unknown status code")
+		return errors.New("HTTPAccess validation: unknown status code")
 	}
 	return nil
 }

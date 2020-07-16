@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"net"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -39,18 +40,29 @@ func (n *Node) Connect() (*ssh.Client, error) {
 	if n.Connection == nil {
 		return nil, fmt.Errorf("Node access: %s node is configured as local", n.NodeName)
 	}
+	auth := make([]ssh.AuthMethod, 0)
 	key, err := ioutil.ReadFile(n.Connection.SSHKey)
 	if err != nil {
 		return nil, err
 	}
-	signer, err := ssh.ParsePrivateKey(key)
-	if err != nil {
-		return nil, err
+	if n.Connection.PassPhrase == "" {
+		signer, err := ssh.ParsePrivateKey(key)
+		if err != nil {
+			return nil, err
+		}
+		auth = append(auth, ssh.PublicKeys(signer))
+	} else {
+		signer, err := ssh.ParsePrivateKeyWithPassphrase(key, []byte(n.Connection.PassPhrase))
+		if err != nil {
+			return nil, err
+		}
+		auth = append(auth, ssh.PublicKeys(signer))
 	}
 	config := &ssh.ClientConfig{
 		User: n.Connection.User,
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(signer),
+		Auth: auth,
+		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			return nil
 		},
 	}
 	server := n.Connection.Host + ":" + n.Connection.Port
@@ -75,14 +87,14 @@ func (n *Node) Valid() error {
 		if n.Connection.Host == "" {
 			return errors.New("Node validation: undefined Host")
 		}
+		if n.Connection.SSHKey == "" {
+			return errors.New("Node validation: undefined SSHKey path")
+		}
 		if n.Connection.Port == "" {
 			n.Connection.Port = "22"
 		}
 		if n.Connection.User == "" {
-			return errors.New("Node validation: undefined User")
-		}
-		if n.Connection.SSHKey == "" {
-			return errors.New("Node validation: undefined SSHKey")
+			n.Connection.User = "root"
 		}
 	}
 	return nil

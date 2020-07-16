@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"fmt"
 	"log"
-	"net/http"
 	"os/exec"
 	"strings"
 	"sync"
@@ -15,26 +14,23 @@ import (
 )
 
 var (
-	OrchestratorServiceName string = "orchestrator"
-	Version                        = "0.0.4"
+	ServiceName string = "orchestrator"
+	Version            = "0.0.5"
 )
 
 type Orchestrator struct {
 	mux      sync.Mutex
+	c        chan Event
 	config   *Configuration
 	nodes    map[string]*Node
 	services map[string]*Service
 	remote   map[string]*ssh.Client
 }
 
-type Configuration struct {
-	ServicesPath, NodesPath string
-	Services                *ServiceConfigurationArray
-	Nodes                   *NodeConfigurationArray
-}
-
-type JSONMessage struct {
-	Message string
+type Event struct {
+	Service string
+	Status  ServiceStatusInfo
+	// Error   error
 }
 
 func NewOrchestrator(config *Configuration) (*Orchestrator, error) {
@@ -45,7 +41,7 @@ func NewOrchestrator(config *Configuration) (*Orchestrator, error) {
 			return nil, err
 		}
 		if _, exist := nodeMap[node.NodeName]; exist {
-			return nil, fmt.Errorf("Orchestrator: node %s is not unique / already defined / duplicated in NodeConfigurationArray", node.NodeName)
+			return nil, fmt.Errorf("Orchestrator: %s node is not unique / already defined / duplicated in NodeConfigurationArray", node.NodeName)
 		}
 		nodeMap[node.NodeName] = node
 		if node.Connection != nil {
@@ -54,6 +50,7 @@ func NewOrchestrator(config *Configuration) (*Orchestrator, error) {
 				remote[node.NodeName] = client
 				nodeMap[node.NodeName].NodeStatus = StatusConnected
 			} else {
+				log.Printf("Orshestartor: %s node: %s\n", node.NodeName, err.Error())
 				nodeMap[node.NodeName].NodeStatus = StatusDisconnected
 			}
 		} else {
@@ -66,87 +63,37 @@ func NewOrchestrator(config *Configuration) (*Orchestrator, error) {
 			return nil, err
 		}
 		if _, exist := srvMap[srv.ServiceName]; exist {
-			return nil, fmt.Errorf("Orchestrator: service %s is not unique / already defined / duplicated in ServiceConfigurationArray", srv.ServiceName)
+			return nil, fmt.Errorf("Orchestrator: %s service is not unique / already defined / duplicated in ServiceConfigurationArray", srv.ServiceName)
 		}
 		srvMap[srv.ServiceName] = srv
 	}
-	return &Orchestrator{sync.Mutex{}, config, nodeMap, srvMap, remote}, nil
+	return &Orchestrator{sync.Mutex{}, make(chan Event, 100), config, nodeMap, srvMap, remote}, nil
 }
 
 func (o *Orchestrator) StartOrchestrator(address string) error {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
-	e.GET("/orchestrator/services", func(c echo.Context) error {
-		m := make([]*Service, 0)
-		for _, service := range o.services {
-			m = append(m, service)
-		}
-		return c.JSON(http.StatusOK, m)
-	})
-	e.GET("/orchestrator/services/:name", func(c echo.Context) error {
-		name := c.ParamValues()
-		if len(name) != 1 {
-			return c.NoContent(http.StatusBadRequest)
-		}
-		srvInfo, ok := o.services[name[0]]
-		if !ok {
-			return c.JSON(http.StatusBadRequest, JSONMessage{"Unknown service"})
-		}
-		return c.JSON(http.StatusOK, srvInfo)
-	})
-	e.GET("/orchestrator/nodes", func(c echo.Context) error {
-		m := make([]*Node, 0)
-		for _, node := range o.nodes {
-			m = append(m, node)
-		}
-		return c.JSON(http.StatusOK, m)
-	})
-	e.GET("/orchestrator/nodes/:name", func(c echo.Context) error {
-		name := c.ParamValues()
-		if len(name) != 1 {
-			return c.NoContent(http.StatusBadRequest)
-		}
-		nodInfo, ok := o.nodes[name[0]]
-		if !ok {
-			return c.JSON(http.StatusBadRequest, JSONMessage{"Unknown node"})
-		}
-		return c.JSON(http.StatusOK, nodInfo)
-	})
-	e.GET("/orchestrator/statuses", func(c echo.Context) error {
-		statuses := make([]struct {
-			ServiceName string
-			StatusInfo  ServiceStatusInfo
-		}, 0)
-		for _, service := range o.services {
-			statuses = append(statuses, struct {
-				ServiceName string
-				StatusInfo  ServiceStatusInfo
-			}{
-				ServiceName: service.ServiceName,
-				StatusInfo:  service.StatusInfo,
-			})
-		}
-		return c.JSON(http.StatusOK, statuses)
-	})
-	e.GET("/orchestrator/statuses/:name", func(c echo.Context) error {
-		name := c.ParamValues()
-		if len(name) != 1 {
-			return c.NoContent(http.StatusBadRequest)
-		}
-		srvInfo, ok := o.services[name[0]]
-		if !ok {
-			return c.JSON(http.StatusBadRequest, JSONMessage{"Unknown service"})
-		}
-		return c.JSON(http.StatusOK, struct {
-			ServiceName string
-			StatusInfo  ServiceStatusInfo
-		}{
-			ServiceName: srvInfo.ServiceName,
-			StatusInfo:  srvInfo.StatusInfo,
-		})
-	})
-	go o.Go()
+	// SERVICES
+	e.GET("/orchestrator/services", o.GetServicesController)
+	e.POST("/orchestrator/services", o.CreateServiceController)
+	e.PUT("/orchestrator/services", o.UpdateServiceController)
+	e.GET("/orchestrator/services/:ServiceName", o.GetServiceByNameController)
+	e.DELETE("/orchestrator/services/:ServiceName", o.DeleteServiceController)
+	// SERVICES: START / STOP
+	e.POST("/orchestrator/services/:ServiceName/:NodeName", o.StartServiceByNameController)
+	e.DELETE("/orchestrator/services/:ServiceName/:NodeName", o.StopServiceByNameController)
+	// NODES
+	e.GET("/orchestrator/nodes", o.GetNodesController)
+	e.POST("/orchestrator/nodes", o.CreateNodeController)
+	e.PUT("/orchestrator/nodes", o.UpdateNodeController)
+	e.GET("/orchestrator/nodes/:NodeName", o.GetNodeByNameController)
+	e.DELETE("/orchestrator/nodes/:NodeName", o.DeleteNodeByNameController)
+	// STATUSES
+	e.GET("/orchestrator/statuses", o.GetServiceStatusesController)
+	e.GET("/orchestrator/statuses/:ServiceName", o.GetServiceStatusByNameController)
+	// ORCHESTRATOR
+	go o.OrchestratorRoutine()
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		ExposeHeaders:    []string{"Server", "Content-Type", "Content-Disposition"},
 		AllowCredentials: true,
@@ -154,10 +101,54 @@ func (o *Orchestrator) StartOrchestrator(address string) error {
 	return e.Start(address)
 }
 
+func (o *Orchestrator) OrchestratorRoutine() {
+	time.Sleep(time.Duration(5) * time.Second)
+	for _, srv := range o.services {
+		go o.ServiceStatusRoutine(srv)
+	}
+	for {
+		e := <-o.c
+		o.mux.Lock()
+		_, ok := o.services[e.Service]
+		if ok {
+			o.services[e.Service].StatusInfo = e.Status
+		}
+		o.mux.Unlock()
+	}
+}
+
+func (o *Orchestrator) ServiceStatusRoutine(srv *Service) {
+	if srv.StartImmediately {
+		for _, node := range srv.Nodes {
+			err := o.StartService(node.NodeName, srv.ServiceName)
+			if err != nil {
+				log.Printf("Orchestrator: %s service has been started immediately on %s node. Error message: %s\n",
+					srv.ServiceName, node.NodeName, err.Error())
+			}
+		}
+	}
+	for { // func ServiceStatus is mutual excluded
+		status, err := o.ServiceStatus(srv.ServiceName) // returns error if only service is unknown
+		if err != nil {                                 // in case on nil service -- routine stops
+			break
+		}
+		o.c <- Event{srv.ServiceName, *status}
+		if srv.Timeout <= 0 {
+			break
+		}
+		time.Sleep(time.Duration(srv.Timeout) * time.Second)
+	}
+}
+
 func (o *Orchestrator) ServiceStatus(service string) (*ServiceStatusInfo, error) {
-	info := &ServiceStatusInfo{StatusUndefined, StatusUndefined, make([]*NodeStatusInfo, 0)}
+	o.mux.Lock() // do not forget about mutual exclusion
 	if _, ok := o.services[service]; !ok {
+		o.mux.Unlock() // here
 		return nil, fmt.Errorf("Service access: %s service is unknown", service)
+	}
+	info := &ServiceStatusInfo{StatusInactive, StatusUndefined, make([]*NodeStatusInfo, 0), time.Now().String(), ""}
+	if o.services[service].Timeout > 0 {
+		info.NextUpdate = time.Now().Add(time.Duration(o.services[service].Timeout) * time.Second).String()
 	}
 	if len(o.services[service].HTTPAccess) > 0 {
 		info.HTTPAccessStatus = StatusPassed
@@ -175,36 +166,36 @@ func (o *Orchestrator) ServiceStatus(service string) (*ServiceStatusInfo, error)
 	for _, node := range o.services[service].Nodes {
 		nodStatus := &NodeStatusInfo{node.NodeName, StatusActive}
 		switch node.OS {
-		case OSWindows:
-			nodStatus.Status = StatusUnknownOS
 		case OSLinux:
 			command := fmt.Sprintf(LinuxTryIsActiveFormatString, service)
 			out, err := o.runcommand(node.NodeName, command)
 			if err != nil {
-				nodStatus.Status = StatusDisconnected
+				nodStatus.ServiceStatus = StatusDisconnected
 			} else if !strings.Contains(out, "0") {
-				nodStatus.Status = StatusInactive
+				nodStatus.ServiceStatus = StatusInactive
 			}
 		case OSDarwin:
 			command := fmt.Sprintf(DarwinTryIsActiveFormatString, service)
 			out, err := o.runcommand(node.NodeName, command)
 			if err != nil {
-				nodStatus.Status = StatusDisconnected
+				nodStatus.ServiceStatus = StatusDisconnected
 			} else if !strings.Contains(out, "0") {
-				nodStatus.Status = StatusInactive
+				nodStatus.ServiceStatus = StatusInactive
 			}
-		}
-		if nodStatus.Status == StatusActive {
-			info.ServiceStatus = StatusActive
+		default:
+			nodStatus.ServiceStatus = StatusUnknownOS
 		}
 		info.NodeStatus = append(info.NodeStatus, nodStatus)
 	}
+	o.mux.Unlock() // here
 	return info, nil
 }
 
 func (o *Orchestrator) StartService(node, service string) error {
+	o.mux.Lock() // do not forget about mutual exclusion
 	command := ""
 	if _, ok := o.nodes[node]; !ok {
+		o.mux.Unlock() // here
 		return fmt.Errorf("Node access: %s node is unknown", node)
 	}
 	switch o.nodes[node].OS {
@@ -214,12 +205,15 @@ func (o *Orchestrator) StartService(node, service string) error {
 		command = fmt.Sprintf(LinuxStartServiceFormatString, service)
 	}
 	_, err := o.runcommand(node, command)
+	o.mux.Unlock() // here
 	return err
 }
 
 func (o *Orchestrator) StopService(node, service string) error {
+	o.mux.Lock() // do not forget about mutual exclusion
 	command := ""
 	if _, ok := o.nodes[node]; !ok {
+		o.mux.Unlock() // here
 		return fmt.Errorf("Node access: %s node is unknown", node)
 	}
 	switch o.nodes[node].OS {
@@ -229,6 +223,7 @@ func (o *Orchestrator) StopService(node, service string) error {
 		command = fmt.Sprintf(LinuxStopServiceFormatString, service)
 	}
 	_, err := o.runcommand(node, command)
+	o.mux.Unlock() // here
 	return err
 }
 
@@ -237,13 +232,23 @@ func (o *Orchestrator) runcommand(node, command string) (string, error) {
 	if _, ok := o.nodes[node]; !ok {
 		return "", fmt.Errorf("Node access: %s node is unknown", node)
 	}
-	if o.nodes[node].Connection == nil {
+	if o.nodes[node].Connection == nil { // LOCAL
 		var err error
-		out, err = exec.Command("bash", "-c", command).Output()
-		if err != nil {
-			return "", err
+		switch o.nodes[node].OS {
+		case OSDarwin:
+			out, err = exec.Command("bash", "-c", command).Output()
+			if err != nil {
+				return "", err
+			}
+		case OSLinux:
+			out, err = exec.Command("bash", "-c", command).Output()
+			if err != nil {
+				return "", err
+			}
+		default:
+			return "", fmt.Errorf("Remote connection is not provided for this OS")
 		}
-	} else {
+	} else { // REMOTE
 		client, err := o.isConnected(node)
 		if err != nil {
 			return "", err
@@ -264,8 +269,8 @@ func (o *Orchestrator) runcommand(node, command string) (string, error) {
 			if err != nil {
 				return "", err
 			}
-		case OSWindows:
-			return "", fmt.Errorf("Remote connection is not provided for windows")
+		default:
+			return "", fmt.Errorf("Remote connection is not provided for this OS")
 		}
 	}
 	return string(out), nil
@@ -291,39 +296,4 @@ func (o *Orchestrator) isConnected(node string) (*ssh.Client, error) {
 		return nil, err
 	}
 	return client, nil
-}
-
-func (o *Orchestrator) Go() {
-	time.Sleep(time.Duration(5) * time.Second)
-	type Event struct {
-		Service string
-		Status  ServiceStatusInfo
-		Error   error
-	}
-	c := make(chan Event, 100)
-	for _, srv := range o.services {
-		for _, node := range srv.Nodes {
-			go func(srv *Service, node *Node, c chan Event) {
-				for {
-					o.mux.Lock()
-					status, err := o.ServiceStatus(srv.ServiceName)
-					o.mux.Unlock()
-					c <- Event{srv.ServiceName, *status, err}
-					if srv.Timeout <= 0 {
-						break
-					}
-					time.Sleep(time.Duration(srv.Timeout) * time.Second)
-				}
-			}(srv, node, c)
-		}
-	}
-	for {
-		e := <-c
-		o.mux.Lock()
-		o.services[e.Service].StatusInfo = e.Status
-		if e.Error != nil {
-			log.Println(e.Service, e.Status.ServiceStatus, e.Error.Error())
-		}
-		o.mux.Unlock()
-	}
 }

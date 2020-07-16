@@ -5,11 +5,43 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"runtime"
 )
 
 type NodeConfigurationArray []*NodeConfiguration
 
 type ServiceConfigurationArray []*ServiceConfiguration
+
+type Configuration struct {
+	ServicesPath, NodesPath string
+	Services                *ServiceConfigurationArray
+	Nodes                   *NodeConfigurationArray
+}
+
+func (o *Orchestrator) UpdateConfiguration() error {
+	nodes, services := make([]*NodeConfiguration, 0), make([]*ServiceConfiguration, 0)
+	for _, node := range o.nodes {
+		nodes = append(nodes, &node.NodeConfiguration)
+	}
+	for _, service := range o.services {
+		n := make([]string, 0)
+		for _, nod := range service.Nodes {
+			n = append(n, nod.NodeName)
+		}
+		services = append(services, &ServiceConfiguration{service.ServiceInfo, n})
+	}
+	n, s := NodeConfigurationArray(nodes), ServiceConfigurationArray(services)
+	o.config.Nodes, o.config.Services = &n, &s
+	err := o.config.Nodes.Save(o.config.NodesPath)
+	if err != nil {
+		return err
+	}
+	err = o.config.Services.Save(o.config.ServicesPath)
+	if err != nil {
+		return err
+	}
+	return nil
+}
 
 // NewServiceConfigurationArray creates new ServiceConfigurationArray by path or takes default if one does not exist
 func NewServiceConfigurationArray(configPath string) (*ServiceConfigurationArray, error) {
@@ -19,14 +51,12 @@ func NewServiceConfigurationArray(configPath string) (*ServiceConfigurationArray
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Configuration file not found, initializing with default\n")
 		config = DefaultServiceConfigurationArray()
-		config.Save(configPath)
 		return config, err
 	}
 	err = json.Unmarshal(file, &config)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Configuration file is broken, initializing with default\n")
 		config = DefaultServiceConfigurationArray()
-		config.Save(configPath)
 		return config, err
 	}
 	return config, nil
@@ -40,14 +70,12 @@ func NewNodeConfigurationArray(configPath string) (*NodeConfigurationArray, erro
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Configuration file not found, initializing with default\n")
 		config = DefaultNodeConfigurationArray()
-		config.Save(configPath)
 		return config, err
 	}
 	err = json.Unmarshal(file, &config)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Configuration file is broken, initializing with default\n")
 		config = DefaultNodeConfigurationArray()
-		config.Save(configPath)
 		return config, err
 	}
 	return config, nil
@@ -55,66 +83,17 @@ func NewNodeConfigurationArray(configPath string) (*NodeConfigurationArray, erro
 
 // DefaultNodeConfigurationArray returns default NodeConfigurationArray
 func DefaultNodeConfigurationArray() *NodeConfigurationArray {
-	def := &NodeConfigurationArray{
+	return &NodeConfigurationArray{
 		{
-			NodeName: "this",
-			OS:       "darwin",
-		},
-		{
-			NodeName: "test",
-			OS:       "linux",
-			Connection: &Connection{
-				Host:   "0.0.0.0",
-				User:   "root",
-				SSHKey: "~/.ssh/my_key",
-			},
+			NodeName: fmt.Sprintf("%s_%s", runtime.GOOS, runtime.GOARCH),
+			OS:       runtime.GOOS,
 		},
 	}
-	return def
 }
 
 // DefaultServiceConfigurationArray returns default ServiceConfigurationArray
 func DefaultServiceConfigurationArray() *ServiceConfigurationArray {
-	def := &ServiceConfigurationArray{
-		{
-			ServiceInfo{
-				ServiceName: "com.orchestrator.app",
-				ServiceType: "orchestrator",
-				URL:         "localhost:6000",
-				HTTPAccess: []*HTTPAccess{
-					{
-						Address:    "http://localhost:6000/orchestrator/nodes",
-						Method:     "GET",
-						StatusCode: 200,
-					},
-					{
-						Address:    "http://localhost:6000/orchestrator/services",
-						Method:     "GET",
-						StatusCode: 200,
-					},
-				},
-				Timeout: 10,
-			},
-			[]string{"this"},
-		},
-		{
-			ServiceInfo{
-				ServiceName: "myuser",
-				ServiceType: "user",
-				URL:         "http://myuser.com.ua",
-				HTTPAccess: []*HTTPAccess{
-					{
-						Address:    "http://myuser.com.ua/api/v1/users",
-						Method:     "GET",
-						StatusCode: 200,
-					},
-				},
-				Timeout: 10,
-			},
-			[]string{"test"},
-		},
-	}
-	return def
+	return &ServiceConfigurationArray{}
 }
 
 func (config *NodeConfigurationArray) Save(configPath string) error {

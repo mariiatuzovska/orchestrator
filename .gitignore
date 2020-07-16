@@ -4,3 +4,4 @@
 # packages
 cmd/cmd
 builds/*
+_test

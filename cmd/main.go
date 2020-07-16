@@ -10,7 +10,7 @@ import (
 
 func main() {
 	app := cli.NewApp()
-	app.Name = "orchestrator"
+	app.Name = orch.ServiceName
 	app.Version = orch.Version
 	app.Copyright = "2020, mariiatuzovska"
 	app.Authors = []cli.Author{{Name: "Tuzovska Mariia"}}
@@ -22,14 +22,23 @@ func main() {
 			Action: func(c *cli.Context) error {
 				services, err := orch.NewServiceConfigurationArray(c.String("sc"))
 				if err != nil {
-					log.Fatal(err)
+					err = services.Save(c.String("sc"))
+					if err != nil {
+						log.Fatal(err)
+					}
 				}
 				nodes, err := orch.NewNodeConfigurationArray(c.String("nc"))
 				if err != nil {
-					log.Fatal(err)
+					err = nodes.Save(c.String("nc"))
+					if err != nil {
+						log.Fatal(err)
+					}
 				}
 				o, err := orch.NewOrchestrator(&orch.Configuration{
-					c.String("sc"), c.String("nc"), services, nodes,
+					ServicesPath: c.String("sc"),
+					NodesPath:    c.String("nc"),
+					Services:     services,
+					Nodes:        nodes,
 				})
 				if err != nil {
 					log.Fatal(err)
