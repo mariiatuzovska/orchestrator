@@ -49,13 +49,13 @@ func NewServiceConfigurationArray(configPath string) (*ServiceConfigurationArray
 	config := new(ServiceConfigurationArray)
 	file, err := ioutil.ReadFile(configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Configuration file not found, initializing with default\n")
+		fmt.Fprintf(os.Stderr, "ServiceConfigurationArray configuration file not found, initializing with default\n")
 		config = DefaultServiceConfigurationArray()
 		return config, err
 	}
 	err = json.Unmarshal(file, &config)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Configuration file is broken, initializing with default\n")
+		fmt.Fprintf(os.Stderr, "ServiceConfigurationArray configuration file is broken, initializing with default\n")
 		config = DefaultServiceConfigurationArray()
 		return config, err
 	}
@@ -68,13 +68,13 @@ func NewNodeConfigurationArray(configPath string) (*NodeConfigurationArray, erro
 	config := new(NodeConfigurationArray)
 	file, err := ioutil.ReadFile(configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Configuration file not found, initializing with default\n")
+		fmt.Fprintf(os.Stderr, "NodeConfigurationArray configuration file not found, initializing with default\n")
 		config = DefaultNodeConfigurationArray()
 		return config, err
 	}
 	err = json.Unmarshal(file, &config)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Configuration file is broken, initializing with default\n")
+		fmt.Fprintf(os.Stderr, "NodeConfigurationArray configuration file is broken, initializing with default\n")
 		config = DefaultNodeConfigurationArray()
 		return config, err
 	}

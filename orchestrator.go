@@ -15,7 +15,7 @@ import (
 
 var (
 	ServiceName string = "orchestrator"
-	Version            = "0.0.5"
+	Version            = "0.0.6"
 )
 
 type Orchestrator struct {

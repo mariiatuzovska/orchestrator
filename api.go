@@ -187,7 +187,7 @@ StopServiceByNameController - Stops service
 func (o *Orchestrator) StopServiceByNameController(c echo.Context) error {
 	name := c.ParamValues()
 	if len(name) != 2 {
-		return c.NoContent(http.StatusBadRequest)
+		return c.JSON(http.StatusBadRequest, JSONMessage{"Can't bind request"})
 	}
 	srv, ok := o.services[name[0]]
 	if !ok {
@@ -334,7 +334,7 @@ GetNodeByNameController - Returns node by NodeName
 func (o *Orchestrator) GetNodeByNameController(c echo.Context) error {
 	name := c.ParamValues()
 	if len(name) != 1 {
-		return c.NoContent(http.StatusBadRequest)
+		return c.JSON(http.StatusBadRequest, JSONMessage{"Can't bind request"})
 	}
 	nodInfo, ok := o.nodes[name[0]]
 	if !ok {
@@ -387,7 +387,7 @@ DeleteNodeByNameController - Deletes node by NodeName
 func (o *Orchestrator) DeleteNodeByNameController(c echo.Context) error {
 	name := c.ParamValues()
 	if len(name) != 1 {
-		return c.NoContent(http.StatusBadRequest)
+		return c.JSON(http.StatusBadRequest, JSONMessage{"Can't bind request"})
 	}
 	nodInfo, ok := o.nodes[name[0]]
 	if !ok {
@@ -435,7 +435,7 @@ GetServiceStatusByNameController - Returns services status by ServiceName
 func (o *Orchestrator) GetServiceStatusByNameController(c echo.Context) error {
 	name := c.ParamValues()
 	if len(name) != 1 {
-		return c.NoContent(http.StatusBadRequest)
+		return c.JSON(http.StatusBadRequest, JSONMessage{"Can't bind request"})
 	}
 	srvInfo, ok := o.services[name[0]]
 	if !ok {

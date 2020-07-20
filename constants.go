@@ -31,6 +31,8 @@ const (
 
 	LinuxStopServiceFormatString  = "systemctl stop %s"   // + ServiceConfiguration.ServiceName
 	DarwinStopServiceFormatString = "launchctl unload %s" // + ServiceConfiguration.ServiceName
+
+	LinuxInstallingDebFormatString = "dpkg -i %s" // + ServiceTemplate.ServioceName
 )
 
 var HttpMethodMap = map[string]bool{
