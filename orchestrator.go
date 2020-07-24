@@ -15,7 +15,7 @@ import (
 
 var (
 	ServiceName string = "orchestrator"
-	Version            = "0.0.6"
+	Version            = "0.0.7"
 )
 
 type Orchestrator struct {
@@ -88,6 +88,7 @@ func (o *Orchestrator) StartOrchestrator(address string) error {
 	e.POST("/orchestrator/nodes", o.CreateNodeController)
 	e.PUT("/orchestrator/nodes", o.UpdateNodeController)
 	e.GET("/orchestrator/nodes/:NodeName", o.GetNodeByNameController)
+	e.POST("/orchestrator/nodes/:NodeName", o.ConnectToNodeByNameController)
 	e.DELETE("/orchestrator/nodes/:NodeName", o.DeleteNodeByNameController)
 	// STATUSES
 	e.GET("/orchestrator/statuses", o.GetServiceStatusesController)
@@ -235,12 +236,7 @@ func (o *Orchestrator) runcommand(node, command string) (string, error) {
 	if o.nodes[node].Connection == nil { // LOCAL
 		var err error
 		switch o.nodes[node].OS {
-		case OSDarwin:
-			out, err = exec.Command("bash", "-c", command).Output()
-			if err != nil {
-				return "", err
-			}
-		case OSLinux:
+		case OSDarwin, OSLinux:
 			out, err = exec.Command("bash", "-c", command).Output()
 			if err != nil {
 				return "", err
@@ -259,12 +255,7 @@ func (o *Orchestrator) runcommand(node, command string) (string, error) {
 		}
 		defer session.Close()
 		switch o.nodes[node].OS {
-		case OSDarwin:
-			out, err = session.CombinedOutput(command)
-			if err != nil {
-				return "", err
-			}
-		case OSLinux:
+		case OSDarwin, OSLinux:
 			out, err = session.CombinedOutput(command)
 			if err != nil {
 				return "", err

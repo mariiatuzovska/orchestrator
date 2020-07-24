@@ -1,5 +1,6 @@
 # files
 *.json
+*.DS_Store
 
 # packages
 builds/*

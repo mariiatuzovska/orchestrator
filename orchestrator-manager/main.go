@@ -21,6 +21,7 @@ func main() {
 		{
 			Name:        "s",
 			Usage:       "Start",
+			Aliases:     []string{"r", "run", "start"},
 			Description: "Strats service",
 			Action: func(c *cli.Context) error {
 				services, err := orch.NewServiceConfigurationArray(c.String("s"))
