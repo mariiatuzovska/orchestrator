@@ -15,7 +15,7 @@ import (
 
 var (
 	ServiceName string = "orchestrator"
-	Version            = "0.0.7"
+	Version            = "0.0.8"
 )
 
 type Orchestrator struct {
@@ -71,6 +71,12 @@ func NewOrchestrator(config *Configuration) (*Orchestrator, error) {
 }
 
 func (o *Orchestrator) StartOrchestrator(address string) error {
+	go o.OrchestratorRoutine()
+	e := o.GetManagerApi()
+	return e.Start(address)
+}
+
+func (o *Orchestrator) GetManagerApi() *echo.Echo {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
@@ -93,13 +99,13 @@ func (o *Orchestrator) StartOrchestrator(address string) error {
 	// STATUSES
 	e.GET("/orchestrator/statuses", o.GetServiceStatusesController)
 	e.GET("/orchestrator/statuses/:ServiceName", o.GetServiceStatusByNameController)
-	// ORCHESTRATOR
-	go o.OrchestratorRoutine()
+
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		ExposeHeaders:    []string{"Server", "Content-Type", "Content-Disposition"},
 		AllowCredentials: true,
 	}))
-	return e.Start(address)
+
+	return e
 }
 
 func (o *Orchestrator) OrchestratorRoutine() {

@@ -24,14 +24,14 @@ func main() {
 			Description: "Remote installation of service",
 			Action: func(c *cli.Context) error {
 				t := orch.ServiceTemplate{
-					c.String("package"),
-					c.String("os"),
-					orch.Connection{
-						c.String("host"),
-						c.String("port"),
-						c.String("user"),
-						c.String("key"),
-						c.String("f"),
+					ServicePackage: c.String("package"),
+					OS:             c.String("os"),
+					Connection: orch.Connection{
+						Host:       c.String("host"),
+						Port:       c.String("port"),
+						User:       c.String("user"),
+						SSHKey:     c.String("key"),
+						PassPhrase: c.String("f"),
 					},
 				}
 				err := t.InstallService()
