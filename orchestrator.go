@@ -108,6 +108,14 @@ func (o *Orchestrator) GetManagerApi() *echo.Echo {
 	return e
 }
 
+func (o *Orchestrator) GetNodes() *map[string]*Node {
+	return &o.nodes
+}
+
+func (o *Orchestrator) GetServices() *map[string]*Service {
+	return &o.services
+}
+
 func (o *Orchestrator) OrchestratorRoutine() {
 	time.Sleep(time.Duration(5) * time.Second)
 	for _, srv := range o.services {
