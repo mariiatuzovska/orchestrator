@@ -1,7 +1,8 @@
 # files
 *.json
 *.DS_Store
+orchestrator-installer/orchestrator-installer
+orchestrator-manager/orchestrator-manager
 
 # packages
-builds/*
 _test
