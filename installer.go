@@ -45,7 +45,7 @@ func (t *ServiceInstaller) InstallService() error {
 	defer session.Close()
 	// installing
 	switch t.OS {
-	case OSLinux, OSDarwin:
+	case OSLinux:
 		command := fmt.Sprintf(LinuxInstallingDebFormatString, path.Join("/tmp", fileCopyName))
 		out, err := session.CombinedOutput(command)
 		if err != nil {

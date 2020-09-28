@@ -34,10 +34,10 @@ const (
 	DarwinTryIsActiveFormatString = "launchctl list | grep %s --quiet; echo $?" // + ServiceConfiguration.ServiceName
 
 	LinuxStartServiceFormatString  = "systemctl start %s" // + ServiceConfiguration.ServiceName
-	DarwinStartServiceFormatString = "launchctl load %s"  // + ServiceConfiguration.ServiceName
+	DarwinStartServiceFormatString = "launchctl start %s" // + ServiceConfiguration.ServiceName
 
-	LinuxStopServiceFormatString  = "systemctl stop %s"   // + ServiceConfiguration.ServiceName
-	DarwinStopServiceFormatString = "launchctl unload %s" // + ServiceConfiguration.ServiceName
+	LinuxStopServiceFormatString  = "systemctl stop %s" // + ServiceConfiguration.ServiceName
+	DarwinStopServiceFormatString = "launchctl stop %s" // + ServiceConfiguration.ServiceName
 
 	LinuxInstallingDebFormatString = "dpkg -i %s" // + ServiceTemplate.ServioceName
 )
