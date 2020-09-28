@@ -16,15 +16,22 @@ const (
 )
 
 const (
+	Debug = iota
+	Info
+	Warning
+	Error
+	Fatal
+)
+
+const (
 	OrchestratorServiceType = "orchestrator"
 
 	OSLinux   = "linux"
 	OSWindows = "windows"
 	OSDarwin  = "darwin"
 
-	LinuxTryIsActiveFormatString   = "systemctl is-active %s --quiet; echo $?" // + ServiceConfiguration.ServiceName
-	DarwinTryIsActiveFormatString  = "launchctl list | grep %s"                // + ServiceConfiguration.ServiceName
-	WindowsTryIsActiveFormatString = ""                                        // лучшая ос просто. лучшая
+	LinuxTryIsActiveFormatString  = "systemctl is-active %s --quiet; echo $?"   // + ServiceConfiguration.ServiceName
+	DarwinTryIsActiveFormatString = "launchctl list | grep %s --quiet; echo $?" // + ServiceConfiguration.ServiceName
 
 	LinuxStartServiceFormatString  = "systemctl start %s" // + ServiceConfiguration.ServiceName
 	DarwinStartServiceFormatString = "launchctl load %s"  // + ServiceConfiguration.ServiceName

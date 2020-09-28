@@ -6,13 +6,14 @@ import (
 	"io/ioutil"
 	"net"
 	"os/exec"
+	"path"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
 )
 
 type Node struct {
-	NodeStatus int
+	nodeStatus int
 	NodeConfiguration
 }
 
@@ -30,12 +31,12 @@ type Connection struct {
 	PassPhrase string
 }
 
-func NewNode(config *NodeConfiguration) (*Node, error) {
-	node := &Node{StatusInitialized, *config}
-	if err := node.Valid(); err != nil {
-		return nil, err
-	}
-	return node, nil
+func NewNode(config *NodeConfiguration) *Node {
+	return &Node{StatusInitialized, *config}
+}
+
+func (n *Node) Status() int {
+	return n.nodeStatus
 }
 
 func (n *Node) Connect() (*ssh.Client, error) {
@@ -49,11 +50,11 @@ func (n *Node) Valid() error {
 	if n.NodeName == "" {
 		return errors.New("Node validation: undefined Name")
 	}
-	if n.OS != OSDarwin && n.OS != OSLinux && n.OS != OSWindows {
+	if n.OS != OSDarwin && n.OS != OSLinux {
 		return errors.New("Node validation: unknown OS")
 	}
 	if n.Connection != nil {
-		return n.Connection.valid()
+		return n.Connection.Valid()
 	}
 	return nil
 }
@@ -91,7 +92,7 @@ func (c *Connection) connect() (*ssh.Client, error) {
 	return client, nil
 }
 
-func (c *Connection) valid() error {
+func (c *Connection) Valid() error {
 	if c == nil {
 		return errors.New("Connection validation: nil Connection")
 	}
@@ -105,7 +106,10 @@ func (c *Connection) valid() error {
 		if err != nil {
 			return err
 		}
-		c.SSHKey = strings.Replace(c.SSHKey, "~/", fmt.Sprintf("%s/", out), 1)
+		if out[len(out)-1] == 10 { // \n
+			out = out[:len(out)-1]
+		}
+		c.SSHKey = path.Join(string(out), strings.Replace(c.SSHKey, "~/", "", 1))
 	}
 	if c.Port == "" {
 		c.Port = "22"

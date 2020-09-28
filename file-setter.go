@@ -15,7 +15,7 @@ type FileSetter struct {
 }
 
 func (fs *FileSetter) SetFile(file *os.File) error {
-	if err := fs.Connection.valid(); err != nil {
+	if err := fs.Connection.Valid(); err != nil {
 		return err
 	}
 	stat, err := file.Stat()
@@ -37,8 +37,6 @@ func (fs *FileSetter) SetFile(file *os.File) error {
 		return err
 	}
 	defer session.Close()
-	// wg := sync.WaitGroup{}
-	// wg.Add(1)
 	errChan := make(chan error, 1)
 	go func(errChan chan error) {
 		hostIn, err := session.StdinPipe()
@@ -69,8 +67,6 @@ func (fs *FileSetter) SetFile(file *os.File) error {
 	default:
 		return fmt.Errorf("Orchestrator file-setter: installing is not provided for %s OS", OSWindows)
 	}
-	// waiting scp
-	// wg.Wait()
 	err = <-errChan
 	if err != nil {
 		log.Printf("Orchestrator file-setter: %s\n", err.Error())
