@@ -5,38 +5,33 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 type Service struct {
-	serviceStatus ServiceStatusInfo
+	ServiceStatus ServiceStatusInfo
 	ServiceInfo
 	Nodes []*Node
 }
 
 type ServiceInfo struct {
-	ServiceName      string
-	ServiceType      string
-	URL              string
-	StartImmediately bool          // starts service immediately
-	HTTPAccess       []*HTTPAccess // http access settings
-	TimeoutSeconds   int           // seconds
-}
-
-type ServiceConfiguration struct {
-	ServiceInfo
-	NodeNames []string // array of node names
+	ServiceName    string
+	URL            string
+	HTTPAccess     []*HTTPAccess // http access settings
+	TimeoutSeconds int           // seconds
 }
 
 type ServiceStatusInfo struct {
 	ServiceStatus    int
 	HTTPAccessStatus int
 	NodeStatus       []*NodeStatusInfo
-	ThisUpdate       string
-	NextUpdate       string
+	ThisUpdate       time.Time
+	NextUpdate       time.Time
 }
 
 type NodeStatusInfo struct {
 	NodeName      string
+	NodeStatus    int
 	ServiceStatus int
 }
 
@@ -59,12 +54,12 @@ type StatusInfo struct {
 	ServiceStatus string
 }
 
-func NewService(config *ServiceConfiguration) *Service {
-	return &Service{ServiceStatusInfo{StatusInitialized, StatusInitialized, []*NodeStatusInfo{}, "", ""}, config.ServiceInfo, []*Node{}}
+func NewService(config *ServiceInfo, nodes ...*Node) *Service {
+	return &Service{ServiceStatusInfo{StatusInitialized, StatusInitialized, []*NodeStatusInfo{}, time.Now(), time.Time{}}, *config, nodes}
 }
 
 func (s *Service) Status() *ServiceStatusInfo {
-	status := s.serviceStatus
+	status := s.ServiceStatus
 	return &status
 }
 
@@ -75,7 +70,7 @@ func (s *Service) SetNode(node *Node) error {
 	}
 	for _, n := range s.Nodes {
 		if n.NodeName == node.NodeName {
-			return fmt.Errorf("Service validation: %s node already exist", node.NodeName)
+			return fmt.Errorf("Service validation: '%s' node already exist", node.NodeName)
 		}
 	}
 	if err := node.Valid(); err != nil {
@@ -89,18 +84,15 @@ func (s *Service) Valid() error {
 	if s.ServiceName == "" {
 		return fmt.Errorf("Service validation: undefined service name")
 	}
-	if s.ServiceType == "" {
-		return fmt.Errorf("Service validation: %s service has undefined service type", s.ServiceName)
-	}
 	if len(s.Nodes) < 1 {
-		return fmt.Errorf("Service validation: %s service must include node(s)", s.ServiceName)
+		return fmt.Errorf("Service validation: '%s' service must include node(s)", s.ServiceName)
 	}
 	if s.TimeoutSeconds < 1 {
 		s.TimeoutSeconds = 0
 	}
 	for _, node := range s.Nodes {
 		if err := node.Valid(); err != nil {
-			return fmt.Errorf("Service validation: %s node is not valid: %s", node.NodeName, err.Error())
+			return fmt.Errorf("Service validation: '%s' node is not valid: %s", node.NodeName, err.Error())
 		}
 	}
 	for _, hAccess := range s.HTTPAccess {
@@ -142,7 +134,7 @@ func (h *HTTPAccess) Do() error {
 		return fmt.Errorf("HTTP access method: %s", err.Error())
 	}
 	if resp.StatusCode != h.StatusCode {
-		return fmt.Errorf("HTTP access method: expected status code %d, got %d", h.StatusCode, resp.StatusCode)
+		return fmt.Errorf("HTTP access method: expected status '%d', got '%d'", h.StatusCode, resp.StatusCode)
 	}
 	return nil
 }

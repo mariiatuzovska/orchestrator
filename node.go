@@ -13,37 +13,36 @@ import (
 )
 
 type Node struct {
-	nodeStatus int
-	NodeConfiguration
+	NodeStatus int
+	NodeInfo
 }
 
-type NodeConfiguration struct {
+type NodeInfo struct {
 	NodeName   string
 	OS         string // linux / darwin / windows
 	Connection *Connection
 }
 
 type Connection struct {
-	Host       string
-	Port       string
-	User       string
-	SSHKey     string // SSHKey is a path to private key (client key)
-	PassPhrase string
+	Host   string
+	Port   string
+	User   string
+	SSHKey string // SSHKey is a path to private key (client key)
 }
 
-func NewNode(config *NodeConfiguration) *Node {
+func NewNode(config *NodeInfo) *Node {
 	return &Node{StatusInitialized, *config}
 }
 
 func (n *Node) Status() int {
-	return n.nodeStatus
+	return n.NodeStatus
 }
 
-func (n *Node) Connect() (*ssh.Client, error) {
+func (n *Node) Connect(passPhrase string) (*ssh.Client, error) {
 	if n.Connection == nil {
-		return nil, fmt.Errorf("Node access: %s node is configured as local", n.NodeName)
+		return nil, fmt.Errorf("Node access: '%s' node is configured as local", n.NodeName)
 	}
-	return n.Connection.connect()
+	return n.Connection.connect(passPhrase)
 }
 
 func (n *Node) Valid() error {
@@ -59,20 +58,20 @@ func (n *Node) Valid() error {
 	return nil
 }
 
-func (c *Connection) connect() (*ssh.Client, error) {
+func (c *Connection) connect(passPhrase string) (*ssh.Client, error) {
 	auth := make([]ssh.AuthMethod, 0)
 	key, err := ioutil.ReadFile(c.SSHKey)
 	if err != nil {
 		return nil, err
 	}
-	if c.PassPhrase == "" {
+	if passPhrase == "" {
 		signer, err := ssh.ParsePrivateKey(key)
 		if err != nil {
 			return nil, err
 		}
 		auth = append(auth, ssh.PublicKeys(signer))
 	} else {
-		signer, err := ssh.ParsePrivateKeyWithPassphrase(key, []byte(c.PassPhrase))
+		signer, err := ssh.ParsePrivateKeyWithPassphrase(key, []byte(passPhrase))
 		if err != nil {
 			return nil, err
 		}

@@ -16,11 +16,11 @@ const (
 )
 
 const (
-	Debug = iota
-	Info
-	Warning
-	Error
-	Fatal
+	DEBUG = iota
+	INFO
+	WARNING
+	ERROR
+	FATAL
 )
 
 const (

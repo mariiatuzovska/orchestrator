@@ -5,22 +5,20 @@ import (
 	"log"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/labstack/echo"
-	"github.com/labstack/echo/middleware"
 	"golang.org/x/crypto/ssh"
 )
 
 var (
 	ServiceName string = "orchestrator"
-	Version            = "0.1.1"
+	fMux        sync.Mutex
 )
 
 type Orchestrator struct {
 	logLevel int
-	mux      sync.Mutex
 	ch       chan Event
 	node     map[string]*Node
 	service  map[string]*Service
@@ -34,115 +32,151 @@ type Event struct {
 }
 
 func NewOrchestrator() *Orchestrator {
-	return &Orchestrator{1, sync.Mutex{}, make(chan Event, 100), make(map[string]*Node), make(map[string]*Service), make(map[string]*ssh.Client)}
+	return &Orchestrator{ERROR, make(chan Event, 100), make(map[string]*Node), make(map[string]*Service), make(map[string]*ssh.Client)}
 }
 
 func (o *Orchestrator) GetNode(name string) (*Node, error) {
 	if node, exist := o.node[name]; exist {
-		return node, nil
+		n := *node // copy
+		return &n, nil
 	}
-	return nil, fmt.Errorf("Orchestrator: %s node is not exist", name)
+	return nil, o.Errorf("'%s' node is not exist", name)
 }
 
 func (o *Orchestrator) GetService(name string) (*Service, error) {
 	if service, exist := o.service[name]; exist {
-		return service, nil
+		s := *service // copy
+		return &s, nil
 	}
-	return nil, fmt.Errorf("Orchestrator: %s service is not exist", name)
+	return nil, o.Errorf("'%s' service is not exist", name)
 }
 
-func (o *Orchestrator) SetNode(nodes ...*Node) error {
-	tmp := o.node
+func (o *Orchestrator) copyNodesAsArray() []*Node {
+	fMux.Lock()
+	nodes := []*Node{}
+	for _, node := range o.node {
+		if node != nil {
+			cp := *node
+			nodes = append(nodes, &cp)
+		}
+	}
+	fMux.Unlock()
+	return nodes
+}
+
+func (o *Orchestrator) copyNodesAsMap() map[string]*Node {
+	fMux.Lock()
+	nodes := map[string]*Node{}
+	for _, node := range o.node {
+		if node != nil {
+			cp := *node
+			nodes[cp.NodeName] = &cp
+		}
+	}
+	fMux.Unlock()
+	return nodes
+}
+
+func (o *Orchestrator) copyServicesAsArray() []*Service {
+	fMux.Lock()
+	services := []*Service{}
+	for _, srv := range o.service {
+		if srv != nil {
+			cp := *srv
+			services = append(services, &cp)
+		}
+	}
+	fMux.Unlock()
+	return services
+}
+
+func (o *Orchestrator) copyServicesAsMap() map[string]*Service {
+	fMux.Lock()
+	services := map[string]*Service{}
+	for _, srv := range o.service {
+		if srv != nil {
+			cp := *srv
+			services[cp.ServiceName] = &cp
+		}
+	}
+	fMux.Unlock()
+	return services
+}
+
+func (o *Orchestrator) RegistrateNodes(nodes ...*Node) error {
 	for _, node := range nodes {
 		if err := node.Valid(); err != nil {
 			return err
 		}
-		if _, exist := tmp[node.NodeName]; exist {
-			return fmt.Errorf("Orchestrator: %s node already exist", node.NodeName)
+		if _, exist := o.node[node.NodeName]; exist {
+			return o.Errorf("'%s' node already exist", node.NodeName)
 		}
-		tmp[node.NodeName] = node
-		o.logf(Info, "New %s node has been set", node.NodeName)
+		fMux.Lock()
+		o.node[node.NodeName] = node
+		fMux.Unlock()
 	}
-	o.node = tmp
 	return nil
 }
 
-func (o *Orchestrator) SetService(services ...*Service) error {
-	tmp := o.service
+func (o *Orchestrator) RegistrateServices(services ...*Service) error {
+	fMux.Lock()
 	for _, service := range services {
+		if _, exist := o.service[service.ServiceName]; exist {
+			fMux.Unlock()
+			return o.Errorf("'%s' service already exist", service.ServiceName)
+		}
 		if err := service.Valid(); err != nil {
+			fMux.Unlock()
 			return err
 		}
-		for _, node := range service.Nodes {
+		nodes := make([]*Node, len(service.Nodes))
+		for i, node := range service.Nodes {
 			if _, exist := o.node[node.NodeName]; !exist {
-				return fmt.Errorf("Orchestrator: %s node is not defined in orchestrator", node.NodeName)
+				fMux.Unlock()
+				return o.Errorf("'%s' node is not defined in orchestrator", node.NodeName)
 			}
+			nodes[i] = o.node[node.NodeName]
 		}
-		if _, exist := tmp[service.ServiceName]; exist {
-			return fmt.Errorf("Orchestrator: %s service already exist", service.ServiceName)
-		}
-		tmp[service.ServiceName] = service
-		o.logf(Info, "New %s service has been set", service.ServiceName)
+		o.service[service.ServiceName] = service
+		o.service[service.ServiceName].Nodes = nodes
 	}
-	o.service = tmp
+	fMux.Unlock()
 	return nil
 }
 
-func (o *Orchestrator) DeleteNode(names ...string) error {
+func (o *Orchestrator) RemoveNodes(names ...string) error {
 	for _, name := range names {
 		if _, exist := o.node[name]; exist {
 			for _, service := range o.service {
 				for _, node := range service.Nodes {
 					if node.NodeName == name {
-						return fmt.Errorf("Orchestrator: %s node already in use", name)
+						return o.Errorf("%s node already in use", name)
 					}
 				}
 			}
+			fMux.Lock()
 			delete(o.node, name)
-			o.logf(Info, "%s node has been deleted from orchestrator", name)
+			fMux.Unlock()
+			o.logf(INFO, "'%s' node has been deleted from orchestrator", name)
 		} else {
-			return fmt.Errorf("Orchestrator: %s service is not exist", name)
+			return o.Errorf("'%s' service is not exist", name)
 		}
 	}
 	return nil
 }
 
-func (o *Orchestrator) DeleteService(names ...string) error {
+func (o *Orchestrator) RemoveService(names ...string) error {
 	for _, name := range names {
 		if _, exist := o.service[name]; exist {
+			fMux.Lock()
 			delete(o.service, name)
-			o.logf(Info, "%s service has been deleted from orchestrator", name)
+			fMux.Unlock()
+			o.logf(INFO, "'%s' service has been deleted from orchestrator", name)
 		} else {
-			return fmt.Errorf("Orchestrator: %s service is not exist", name)
+			return o.Errorf("'%s' service is not exist", name)
 		}
 	}
 	return nil
-}
-
-func (o *Orchestrator) BasicAPI() *echo.Echo {
-	e := echo.New()
-	e.HideBanner = true
-	e.HidePort = true
-	// SERVICES
-	e.GET("/orchestrator/services", o.GetServicesController)
-	e.GET("/orchestrator/services/:ServiceName", o.GetServiceByNameController)
-	// SERVICES: START / STOP
-	e.POST("/orchestrator/services/:ServiceName/:NodeName", o.StartServiceByNameController)
-	e.DELETE("/orchestrator/services/:ServiceName/:NodeName", o.StopServiceByNameController)
-	// NODES
-	e.GET("/orchestrator/nodes", o.GetNodesController)
-	e.GET("/orchestrator/nodes/:NodeName", o.GetNodeByNameController)
-	e.POST("/orchestrator/nodes/:NodeName", o.ConnectToNodeByNameController)
-	// STATUSES
-	e.GET("/orchestrator/statuses", o.GetServiceStatusesController)
-	e.GET("/orchestrator/statuses/:ServiceName", o.GetServiceStatusByNameController)
-
-	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		ExposeHeaders:    []string{"Server", "Content-Type", "Content-Disposition"},
-		AllowCredentials: true,
-	}))
-
-	return e
 }
 
 func (o *Orchestrator) Start() {
@@ -152,36 +186,25 @@ func (o *Orchestrator) Start() {
 	}
 	for {
 		e := <-o.ch
-		o.mux.Lock()
-		_, ok := o.service[e.Service]
-		if ok {
-			o.service[e.Service].serviceStatus = e.Status
-			if o.logLevel < Warning {
-				o.logf(Info, "%s service has HTTP access status=%d", e.Service, e.Status.HTTPAccessStatus)
+		if _, ok := o.service[e.Service]; ok {
+			fMux.Lock()
+			o.service[e.Service].ServiceStatus = e.Status
+			fMux.Unlock()
+			if o.logLevel < INFO {
+				o.logf(DEBUG, "'%s' service has HTTP access status=%d", e.Service, e.Status.HTTPAccessStatus)
 				for _, nodeStatus := range e.Status.NodeStatus {
-					o.logf(Info, "%s service has status=%d on %s node", e.Service, nodeStatus.ServiceStatus, nodeStatus.NodeName)
+					o.logf(DEBUG, "'%s' service has status=%d on '%s' node", e.Service, nodeStatus.ServiceStatus, nodeStatus.NodeName)
 				}
-			} else {
-				o.logf(Warning, "%s service has status=%d", e.Service, e.Status.ServiceStatus)
 			}
+			o.logf(INFO, "'%s' service has status=%d", e.Service, e.Status.ServiceStatus)
 		}
-		o.mux.Unlock()
 	}
 }
 
 func (o *Orchestrator) serviceStatusRoutine(serviceName string) error {
 	srv, exist := o.service[serviceName]
 	if !exist {
-		fmt.Errorf("Service access: %s service is unknown", serviceName)
-	}
-	if srv.StartImmediately {
-		for _, node := range srv.Nodes {
-			err := o.StartService(node.NodeName, srv.ServiceName)
-			if err != nil {
-				log.Printf("Orchestrator: %s service has been started immediately on %s node. Error message: %s\n",
-					srv.ServiceName, node.NodeName, err.Error())
-			}
-		}
+		return o.Errorf("Service access: '%s' service is unknown", serviceName)
 	}
 	for { // func ServiceStatus is mutual excluded
 		status, err := o.ServiceStatus(srv.ServiceName) // returns error if only service is unknown
@@ -190,6 +213,7 @@ func (o *Orchestrator) serviceStatusRoutine(serviceName string) error {
 			return err
 		}
 		o.ch <- Event{srv.ServiceName, *status, nil}
+		o.logf(DEBUG, "'%s' service has status=%d", srv.ServiceName, status.ServiceStatus)
 		if srv.TimeoutSeconds < 1 {
 			return nil
 		}
@@ -198,18 +222,17 @@ func (o *Orchestrator) serviceStatusRoutine(serviceName string) error {
 }
 
 func (o *Orchestrator) ServiceStatus(serviceName string) (*ServiceStatusInfo, error) {
-	o.mux.Lock()
-	defer o.mux.Unlock()
-	if _, ok := o.service[serviceName]; !ok {
-		return nil, fmt.Errorf("Service access: %s service is unknown", serviceName)
+	service, err := o.GetService(serviceName)
+	if err != nil {
+		return nil, err
 	}
-	info := &ServiceStatusInfo{StatusInactive, StatusUndefined, make([]*NodeStatusInfo, 0), time.Now().String(), ""}
-	if o.service[serviceName].TimeoutSeconds > 0 {
-		info.NextUpdate = time.Now().Add(time.Duration(o.service[serviceName].TimeoutSeconds) * time.Second).String()
+	info := &ServiceStatusInfo{StatusUndefined, StatusUndefined, make([]*NodeStatusInfo, 0), time.Now(), time.Time{}}
+	if service.TimeoutSeconds > 0 {
+		info.NextUpdate = time.Now().Add(time.Duration(service.TimeoutSeconds) * time.Second)
 	}
-	if len(o.service[serviceName].HTTPAccess) > 0 {
+	if len(service.HTTPAccess) > 0 {
 		info.HTTPAccessStatus = StatusPassed
-		for _, access := range o.service[serviceName].HTTPAccess {
+		for _, access := range service.HTTPAccess {
 			err := access.Do()
 			if err != nil {
 				info.HTTPAccessStatus = StatusFailed
@@ -217,145 +240,228 @@ func (o *Orchestrator) ServiceStatus(serviceName string) (*ServiceStatusInfo, er
 			}
 		}
 	}
-	if info.HTTPAccessStatus == StatusPassed {
-		info.ServiceStatus = StatusActive
-	}
-	for _, node := range o.service[serviceName].Nodes {
-		nodStatus := &NodeStatusInfo{node.NodeName, StatusInitialized}
+	for _, node := range service.Nodes {
+		n, err := o.GetNode(node.NodeName)
+		if err != nil {
+			return nil, err
+		}
+		nodStatus := &NodeStatusInfo{n.NodeName, node.NodeStatus, StatusUndefined}
 		command := ""
-		switch node.OS {
+		switch n.OS {
 		case OSLinux:
 			command = fmt.Sprintf(LinuxTryIsActiveFormatString, serviceName)
 		case OSDarwin:
 			command = fmt.Sprintf(DarwinTryIsActiveFormatString, serviceName)
 		default:
 			nodStatus.ServiceStatus = StatusUnknownOS
-			continue
 		}
 		if command != "" {
-			out, err := o.RunCommand(node.NodeName, command)
+			out, err := o.RunCommand(n.NodeName, command)
 			if err != nil {
+				o.logf(DEBUG, "Running command error: %s", err.Error())
 				nodStatus.ServiceStatus = StatusDisconnected
-			} else if numStatus, err := strconv.Atoi(out); err == nil {
-				nodStatus.ServiceStatus = numStatus
-				if numStatus == StatusActive {
-					info.ServiceStatus = StatusActive
+				if info.ServiceStatus == StatusUndefined {
+					info.ServiceStatus = StatusInactive
 				}
 			} else {
-				info.ServiceStatus = StatusInactive
+				outStr := strings.ReplaceAll(string(out), "\n", "")
+				o.logf(DEBUG, "Status result by '%s' node: %s", n.NodeName, outStr)
+				numStatus, err := strconv.Atoi(outStr)
+				if err == nil {
+					nodStatus.ServiceStatus = numStatus
+				}
+				if info.ServiceStatus == StatusUndefined && nodStatus.ServiceStatus == StatusActive {
+					info.ServiceStatus = StatusActive
+				}
 			}
-			info.NodeStatus = append(info.NodeStatus, nodStatus)
 		}
+		info.NodeStatus = append(info.NodeStatus, nodStatus)
 	}
 	return info, nil
 }
 
 func (o *Orchestrator) StartService(nodeName, serviceName string) error {
-	o.mux.Lock()
-	defer o.mux.Unlock()
 	command := ""
-	if _, ok := o.node[nodeName]; !ok {
-		return fmt.Errorf("Node access: %s node is unknown", serviceName)
+	service, err := o.GetService(serviceName)
+	if err != nil {
+		return err
 	}
-	switch o.node[nodeName].OS {
+	node := new(Node)
+	for _, n := range service.Nodes {
+		if n.NodeName == nodeName {
+			node = n
+		}
+	}
+	switch node.OS {
 	case OSDarwin:
 		command = fmt.Sprintf(DarwinStartServiceFormatString, serviceName)
 	case OSLinux:
 		command = fmt.Sprintf(LinuxStartServiceFormatString, serviceName)
+	default:
+		return o.Errorf("unknown node '%s' or node's OS '%s'", nodeName, node.OS)
 	}
-	_, err := o.RunCommand(serviceName, command)
-	return err
+	if _, err := o.RunCommand(node.NodeName, command); err != nil {
+		o.logf(ERROR, "'%s' service has not been started on '%s' node. Error message: %s", serviceName, nodeName, err.Error())
+		return err
+	}
+	o.logf(WARNING, "'%s' service has been started on '%s' node", serviceName, nodeName)
+	return nil
 }
 
 func (o *Orchestrator) StopService(nodeName, serviceName string) error {
-	o.mux.Lock()
-	defer o.mux.Unlock()
 	command := ""
-	if _, ok := o.node[nodeName]; !ok {
-		return fmt.Errorf("Node access: %s node is unknown", nodeName)
+	service, err := o.GetService(serviceName)
+	if err != nil {
+		return err
 	}
-	switch o.node[nodeName].OS {
+	node := new(Node)
+	for _, n := range service.Nodes {
+		if n.NodeName == nodeName {
+			node = n
+		}
+	}
+	switch node.OS {
 	case OSDarwin:
 		command = fmt.Sprintf(DarwinStopServiceFormatString, serviceName)
 	case OSLinux:
 		command = fmt.Sprintf(LinuxStopServiceFormatString, serviceName)
+	default:
+		return o.Errorf("unknown '%s' node or node's OS '%s'", nodeName, node.OS)
 	}
-	_, err := o.RunCommand(nodeName, command)
-	return err
+	if _, err := o.RunCommand(node.NodeName, command); err != nil {
+		o.logf(ERROR, "'%s' service has not been started on '%s' node. Error message: %s", serviceName, nodeName, err.Error())
+		return err
+	}
+	o.logf(WARNING, "'%s' service has been stopped on '%s' node", serviceName, nodeName)
+	return nil
 }
 
-func (o *Orchestrator) RunCommand(nodeName, command string) (string, error) {
-	var out []byte
+func (o *Orchestrator) ConnectNode(nodeName, passPhrase string) error {
+	fMux.Lock()
 	if _, ok := o.node[nodeName]; !ok {
-		return "", fmt.Errorf("Node access: %s node is unknown", nodeName)
+		fMux.Unlock()
+		return o.Errorf("unknown '%s' node", nodeName)
 	}
-	if o.node[nodeName].Connection == nil { // LOCAL
+	if o.node[nodeName].Connection != nil {
+		client, err := o.node[nodeName].Connect(passPhrase)
+		if err != nil {
+			o.node[nodeName].NodeStatus = StatusDisconnected
+			fMux.Unlock()
+			return o.Errorf("'%s' node connection error: %s", nodeName, err.Error())
+		}
+		o.client[nodeName] = client
+	}
+	o.node[nodeName].NodeStatus = StatusConnected
+	fMux.Unlock()
+	o.logf(WARNING, "'%s' node has been connected", nodeName)
+	return nil
+}
+
+func (o *Orchestrator) DisconnectNode(nodeName string) error {
+	fMux.Lock()
+	if _, ok := o.node[nodeName]; !ok {
+		fMux.Unlock()
+		return o.Errorf("unknown '%s' node", nodeName)
+	}
+	if o.node[nodeName].Connection != nil {
+		delete(o.client, nodeName)
+		o.node[nodeName].NodeStatus = StatusDisconnected
+	} else {
+		o.node[nodeName].NodeStatus = StatusConnected
+	}
+	fMux.Unlock()
+	o.logf(WARNING, "'%s' node has been disconnected", nodeName)
+	return nil
+}
+
+func (o *Orchestrator) RunCommand(nodeName, command string) ([]byte, error) {
+	var out []byte
+	node, err := o.GetNode(nodeName)
+	if err != nil {
+		return nil, err
+	}
+	if node.Connection == nil { // LOCAL
 		var err error
-		switch o.node[nodeName].OS {
+		switch node.OS {
 		case OSDarwin, OSLinux:
+			o.logf(DEBUG, "'%s' node command: '%s'", nodeName, command)
 			out, err = exec.Command("bash", "-c", command).Output()
 			if err != nil {
-				return "", err
+				return nil, err
 			}
 		default:
-			return "", fmt.Errorf("Remote connection is not provided for %s OS", o.node[nodeName].OS)
+			return nil, o.Errorf("remote connection is not provided for '%s' OS", o.node[nodeName].OS)
 		}
 	} else { // REMOTE
 		client, err := o.IsNodeConnected(nodeName)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		session, err := client.NewSession()
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		defer session.Close()
-		switch o.node[nodeName].OS {
+		switch node.OS {
 		case OSDarwin, OSLinux:
+			o.logf(DEBUG, "'%s' node command: '%s'", nodeName, command)
 			out, err = session.CombinedOutput(command)
 			if err != nil {
-				return "", err
+				return nil, err
 			}
 		default:
-			return "", fmt.Errorf("Remote connection is not provided for %s OS", o.node[nodeName].OS)
+			return nil, o.Errorf("remote connection is not provided for %s OS", o.node[nodeName].OS)
 		}
 	}
-	return string(out), nil
+	return out, nil
 }
 
-func (o *Orchestrator) IsNodeConnected(nodeNmae string) (*ssh.Client, error) {
-	if _, ok := o.node[nodeNmae]; !ok {
-		return nil, fmt.Errorf("Node access: %s node is unknown", nodeNmae)
+func (o *Orchestrator) IsNodeConnected(nodeName string) (*ssh.Client, error) {
+	fMux.Lock()
+	if _, ok := o.node[nodeName]; !ok {
+		fMux.Unlock()
+		return nil, o.Errorf("Node access: unknown '%s' node", nodeName)
 	}
-	client, ok := o.client[nodeNmae]
+	client, ok := o.client[nodeName]
 	if !ok {
-		o.node[nodeNmae].nodeStatus = StatusDisconnected
-		return nil, fmt.Errorf("Node access: %s node has nil Connection", nodeNmae)
+		o.node[nodeName].NodeStatus = StatusDisconnected
+		fMux.Unlock()
+		return nil, o.Errorf("Node access: '%s' node has nil Connection", nodeName)
 	}
 	session, err := client.NewSession()
 	if err != nil {
-		o.node[nodeNmae].nodeStatus = StatusDisconnected
+		o.node[nodeName].NodeStatus = StatusDisconnected
+		fMux.Unlock()
 		return nil, err
 	}
 	err = session.Close()
 	if err != nil {
-		o.node[nodeNmae].nodeStatus = StatusDisconnected
+		o.node[nodeName].NodeStatus = StatusDisconnected
+		fMux.Unlock()
 		return nil, err
 	}
+	o.node[nodeName].NodeStatus = StatusConnected
+	fMux.Unlock()
 	return client, nil
 }
 
 func (o *Orchestrator) SetLogLevel(lvl int) {
 	if lvl > -1 && lvl < 5 {
 		o.logLevel = lvl
+	} else {
+		o.logLevel = INFO
 	}
 }
 
 func (o *Orchestrator) logf(lvl int, format string, msg ...interface{}) {
-	o.mux.Lock()
-	var logLevels = map[int]string{Debug: "Debug", Info: "Info", Warning: "Warning", Error: "Error", Fatal: "Fatal"}
+	fMux.Lock()
+	var logLevels = map[int]string{DEBUG: "Debug", INFO: "Info", WARNING: "Warning", ERROR: "Error"}
 	if t, ok := logLevels[lvl]; ok && lvl >= o.logLevel {
 		log.Printf("%s | Orchestrator | %s | %s", time.Now().Format(time.RFC3339), t, fmt.Sprintf(format, msg...))
 	}
-	o.mux.Unlock()
+	fMux.Unlock()
+}
+
+func (o *Orchestrator) Errorf(format string, msg ...interface{}) error {
+	return fmt.Errorf("Orchestrator: %s", fmt.Sprintf(format, msg...))
 }

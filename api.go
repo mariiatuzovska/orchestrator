@@ -2,10 +2,10 @@ package orchestrator
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 
 	"github.com/labstack/echo"
+	"github.com/labstack/echo/middleware"
 )
 
 type JSONMessage struct {
@@ -17,6 +17,44 @@ type ServiceStatusInfoResponse struct {
 	StatusInfo  ServiceStatusInfo
 }
 
+type Server struct {
+	*echo.Echo
+	Orchestrator *Orchestrator
+}
+
+type BodyWithPassPhrase struct {
+	PassPhrase string
+}
+
+func (o *Orchestrator) Server() *Server {
+	s := &Server{echo.New(), o}
+	s.HideBanner = true
+	s.HidePort = true
+	// INFO
+	s.GET("/orchestrator", func(c echo.Context) error { return c.JSON(http.StatusOK, s.Routes()) })
+	s.GET("/orchestrator/services", s.GetServicesController)
+	// SERVICES
+	s.GET("/orchestrator/services", s.GetServicesController)
+	s.GET("/orchestrator/services/:ServiceName", s.GetServiceByNameController)
+	// SERVICES: START / STOP
+	s.POST("/orchestrator/services/:ServiceName/:NodeName", s.StartServiceByNameController)
+	s.DELETE("/orchestrator/services/:ServiceName/:NodeName", s.StopServiceByNameController)
+	// NODES
+	s.GET("/orchestrator/nodes", s.GetNodesController)
+	s.GET("/orchestrator/nodes/:NodeName", s.GetNodeByNameController)
+	s.POST("/orchestrator/nodes/:NodeName", s.ConnectToNodeByNameController)
+	s.DELETE("/orchestrator/nodes/:NodeName", s.DisconnectNodeByNameController)
+	// STATUSES
+	s.GET("/orchestrator/statuses", s.GetServiceStatusesController)
+	s.GET("/orchestrator/statuses/:ServiceName", s.GetServiceStatusByNameController)
+
+	s.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+		ExposeHeaders:    []string{"Server", "Content-Type", "Content-Disposition"},
+		AllowCredentials: true,
+	}))
+	return s
+}
+
 /*
 GetServicesController - Returns services
 @url /orchestrator/services
@@ -24,12 +62,8 @@ GetServicesController - Returns services
 @response []Service
 @response-type application/json
 */
-func (o *Orchestrator) GetServicesController(c echo.Context) error {
-	m := make([]*Service, 0)
-	for _, service := range o.service {
-		m = append(m, service)
-	}
-	return c.JSON(http.StatusOK, m)
+func (s *Server) GetServicesController(c echo.Context) error {
+	return c.JSON(http.StatusOK, s.Orchestrator.copyServicesAsArray())
 }
 
 /*
@@ -39,16 +73,16 @@ GetServiceByNameController - Returns service by ServiceName
 @response Service
 @response-type application/json
 */
-func (o *Orchestrator) GetServiceByNameController(c echo.Context) error {
+func (s *Server) GetServiceByNameController(c echo.Context) error {
 	name := c.ParamValues()
 	if len(name) != 1 {
-		return c.JSON(http.StatusBadRequest, JSONMessage{"Can't bind request"})
+		return c.JSON(http.StatusBadRequest, JSONMessage{"Can't bind url parameter"})
 	}
-	srvInfo, ok := o.service[name[0]]
-	if !ok {
-		return c.JSON(http.StatusBadRequest, JSONMessage{"Unknown service"})
+	srv, err := s.Orchestrator.GetService(name[0])
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, JSONMessage{err.Error()})
 	}
-	return c.JSON(http.StatusOK, srvInfo)
+	return c.JSON(http.StatusOK, srv)
 }
 
 /*
@@ -57,35 +91,14 @@ StartServiceByNameController - Starts service
 @method POST
 @response-type text/plain
 */
-func (o *Orchestrator) StartServiceByNameController(c echo.Context) error {
-	name := c.ParamValues()
-	if len(name) != 2 {
-		return c.JSON(http.StatusBadRequest, JSONMessage{"Can't bind request"})
+func (s *Server) StartServiceByNameController(c echo.Context) error {
+	param := c.ParamValues()
+	if len(param) != 2 {
+		return c.JSON(http.StatusBadRequest, JSONMessage{"Can't bind url parameters"})
 	}
-	srv, ok := o.service[name[0]]
-	if !ok {
-		return c.JSON(http.StatusBadRequest, JSONMessage{"Unknown service"})
-	}
-	node, ok := o.node[name[1]]
-	if !ok {
-		return c.JSON(http.StatusBadRequest, JSONMessage{"Unknown node"})
-	}
-	ok = false
-	for _, n := range srv.Nodes {
-		if n.NodeName == node.NodeName {
-			ok = true
-			break
-		}
-	}
-	if !ok {
-		return c.JSON(http.StatusBadRequest, JSONMessage{
-			fmt.Sprintf("%s service has not %s node", srv.ServiceName, node.NodeName),
-		})
-	}
-	err := o.StartService(node.NodeName, srv.ServiceName)
-	if err != nil {
+	if err := s.Orchestrator.StartService(param[1], param[0]); err != nil {
 		return c.JSON(http.StatusInternalServerError, JSONMessage{
-			fmt.Sprintf("Orchestrator: %s.%s starting error: %s", srv.ServiceName, node.NodeName, err.Error()),
+			fmt.Sprintf("Orchestrator: %s.%s starting error: %s", param[0], param[1], err.Error()),
 		})
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -97,18 +110,18 @@ StopServiceByNameController - Stops service
 @method DELETE
 @response-type text/plain
 */
-func (o *Orchestrator) StopServiceByNameController(c echo.Context) error {
+func (s *Server) StopServiceByNameController(c echo.Context) error {
 	name := c.ParamValues()
 	if len(name) != 2 {
-		return c.JSON(http.StatusBadRequest, JSONMessage{"Can't bind request"})
+		return c.JSON(http.StatusBadRequest, JSONMessage{"Can't bind url parameters"})
 	}
-	srv, ok := o.service[name[0]]
-	if !ok {
-		return c.JSON(http.StatusBadRequest, JSONMessage{"Unknown service"})
+	srv, err := s.Orchestrator.GetService(name[0])
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, JSONMessage{err.Error()})
 	}
-	node, ok := o.node[name[1]]
-	if !ok {
-		return c.JSON(http.StatusBadRequest, JSONMessage{"Unknown node"})
+	node, err := s.Orchestrator.GetNode(name[1])
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, JSONMessage{err.Error()})
 	}
 	exist := false
 	for _, n := range srv.Nodes {
@@ -122,10 +135,9 @@ func (o *Orchestrator) StopServiceByNameController(c echo.Context) error {
 			fmt.Sprintf("%s service has no node with name %s", srv.ServiceName, node.NodeName),
 		})
 	}
-	err := o.StopService(node.NodeName, srv.ServiceName)
-	if err != nil {
+	if err := s.Orchestrator.StopService(node.NodeName, srv.ServiceName); err != nil {
 		return c.JSON(http.StatusInternalServerError, JSONMessage{
-			fmt.Sprintf("Orchestrator: %s.%s starting error: %s", srv.ServiceName, node.NodeName, err.Error()),
+			fmt.Sprintf("Orchestrator: %s.%s stopping error: %s", srv.ServiceName, node.NodeName, err.Error()),
 		})
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -138,12 +150,8 @@ GetNodesController - Returns nodes
 @response []Node
 @response-type application/json
 */
-func (o *Orchestrator) GetNodesController(c echo.Context) error {
-	m := make([]*Node, 0)
-	for _, node := range o.node {
-		m = append(m, node)
-	}
-	return c.JSON(http.StatusOK, m)
+func (s *Server) GetNodesController(c echo.Context) error {
+	return c.JSON(http.StatusOK, s.Orchestrator.copyNodesAsArray())
 }
 
 /*
@@ -153,50 +161,66 @@ GetNodeByNameController - Returns node by NodeName
 @response Node
 @response-type application/json
 */
-func (o *Orchestrator) GetNodeByNameController(c echo.Context) error {
+func (s *Server) GetNodeByNameController(c echo.Context) error {
 	name := c.ParamValues()
 	if len(name) != 1 {
-		return c.JSON(http.StatusBadRequest, JSONMessage{"Can't bind request"})
+		return c.JSON(http.StatusBadRequest, JSONMessage{"Can't bind url parameter"})
 	}
-	nodInfo, ok := o.node[name[0]]
-	if !ok {
-		return c.JSON(http.StatusBadRequest, JSONMessage{"Unknown node"})
+	node, err := s.Orchestrator.GetNode(name[0])
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, JSONMessage{err.Error()})
 	}
-	return c.JSON(http.StatusOK, nodInfo)
+	return c.JSON(http.StatusOK, node)
 }
 
 /*
 ConnectToNodeByNameController - Reconnects to node
 @url /orchestrator/nodes/<NodeName>
 @method POST
+@request BodyWithPassPhrase
 @response-type text/plain
 */
-func (o *Orchestrator) ConnectToNodeByNameController(c echo.Context) error {
+func (s *Server) ConnectToNodeByNameController(c echo.Context) error {
 	name := c.ParamValues()
 	if len(name) != 1 {
-		return c.JSON(http.StatusBadRequest, JSONMessage{"Can't bind request"})
+		return c.JSON(http.StatusBadRequest, JSONMessage{"Can't bind url parameter"})
 	}
-	node, ok := o.node[name[0]]
-	if !ok {
-		return c.JSON(http.StatusBadRequest, JSONMessage{"Unknown node"})
+	body := BodyWithPassPhrase{}
+	c.Bind(&body)
+	node, err := s.Orchestrator.GetNode(name[0])
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, JSONMessage{err.Error()})
 	}
-	if node.nodeStatus == StatusConnected {
+	if node.NodeStatus == StatusConnected {
 		return c.NoContent(http.StatusNoContent)
 	}
-	o.mux.Lock()
-	if node.Connection != nil {
-		client, err := node.Connect()
-		if err == nil {
-			o.client[node.NodeName] = client
-			o.node[node.NodeName].nodeStatus = StatusConnected
-		} else {
-			log.Printf("Orshestartor: %s node: %s\n", node.NodeName, err.Error())
-			o.node[node.NodeName].nodeStatus = StatusDisconnected
-		}
-	} else {
-		o.node[node.NodeName].nodeStatus = StatusConnected
+	if err := s.Orchestrator.ConnectNode(name[0], body.PassPhrase); err != nil {
+		return c.JSON(http.StatusBadRequest, JSONMessage{err.Error()})
 	}
-	o.mux.Unlock()
+	return c.NoContent(http.StatusNoContent)
+}
+
+/*
+DisconnectNodeByNameController - Reconnects to node
+@url /orchestrator/nodes/<NodeName>
+@method DELETE
+@response-type text/plain
+*/
+func (s *Server) DisconnectNodeByNameController(c echo.Context) error {
+	name := c.ParamValues()
+	if len(name) != 1 {
+		return c.JSON(http.StatusBadRequest, JSONMessage{"Can't bind url parameter"})
+	}
+	node, err := s.Orchestrator.GetNode(name[0])
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, JSONMessage{err.Error()})
+	}
+	if node.NodeStatus == StatusDisconnected {
+		return c.NoContent(http.StatusNoContent)
+	}
+	if err := s.Orchestrator.DisconnectNode(name[0]); err != nil {
+		return c.JSON(http.StatusBadRequest, JSONMessage{err.Error()})
+	}
 	return c.NoContent(http.StatusNoContent)
 }
 
@@ -207,10 +231,11 @@ GetServiceStatusesController - Returns services statuses
 @response []ServiceStatusInfoResponse
 @response-type application/json
 */
-func (o *Orchestrator) GetServiceStatusesController(c echo.Context) error {
+func (s *Server) GetServiceStatusesController(c echo.Context) error {
 	statuses := make([]ServiceStatusInfoResponse, 0)
-	for _, service := range o.service {
-		statuses = append(statuses, ServiceStatusInfoResponse{service.ServiceName, service.serviceStatus})
+	services := s.Orchestrator.copyServicesAsArray()
+	for _, service := range services {
+		statuses = append(statuses, ServiceStatusInfoResponse{service.ServiceName, service.ServiceStatus})
 	}
 	return c.JSON(http.StatusOK, statuses)
 }
@@ -222,14 +247,14 @@ GetServiceStatusByNameController - Returns services status by ServiceName
 @response ServiceStatusInfoResponse
 @response-type application/json
 */
-func (o *Orchestrator) GetServiceStatusByNameController(c echo.Context) error {
+func (s *Server) GetServiceStatusByNameController(c echo.Context) error {
 	name := c.ParamValues()
 	if len(name) != 1 {
-		return c.JSON(http.StatusBadRequest, JSONMessage{"Can't bind request"})
+		return c.JSON(http.StatusBadRequest, JSONMessage{"Can't bind url parameter"})
 	}
-	srvInfo, ok := o.service[name[0]]
-	if !ok {
-		return c.JSON(http.StatusBadRequest, JSONMessage{"Unknown service"})
+	srv, err := s.Orchestrator.GetService(name[0])
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, JSONMessage{err.Error()})
 	}
-	return c.JSON(http.StatusOK, ServiceStatusInfoResponse{srvInfo.ServiceName, srvInfo.serviceStatus})
+	return c.JSON(http.StatusOK, ServiceStatusInfoResponse{srv.ServiceName, srv.ServiceStatus})
 }
