@@ -214,11 +214,6 @@ func (o *Orchestrator) Start() {
 }
 
 func (o *Orchestrator) ServiceStatusRoutine(serviceName string) {
-	srv, err := o.GetService(serviceName)
-	if err != nil {
-		o.logf(ERROR, err.Error())
-		return
-	}
 	fMux.Lock()
 	if _, exist := o.status[serviceName]; exist {
 		fMux.Unlock()
@@ -227,25 +222,33 @@ func (o *Orchestrator) ServiceStatusRoutine(serviceName string) {
 	}
 	o.status[serviceName] = true
 	fMux.Unlock()
+	srv, err := o.GetService(serviceName)
+	if err != nil {
+		o.logf(ERROR, err.Error())
+		o.rmStatusR(serviceName)
+		return
+	}
 	for { // func ServiceStatus is mutual excluded
 		status, err := o.ServiceStatus(srv.ServiceName) // returns error if only service is unknown
 		if err != nil {                                 // in case on nil service -- routine stops
 			o.ch <- Event{srv.ServiceName, *status, err}
-			fMux.Lock()
-			delete(o.status, serviceName)
-			fMux.Unlock()
+			o.rmStatusR(serviceName)
 			return
 		}
 		o.ch <- Event{srv.ServiceName, *status, nil}
 		o.logf(DEBUG, "'%s' service has status=%d", srv.ServiceName, status.ServiceStatus)
 		if srv.TimeoutSeconds < 1 {
-			fMux.Lock()
-			delete(o.status, serviceName)
-			fMux.Unlock()
+			o.rmStatusR(serviceName)
 			return
 		}
 		time.Sleep(time.Duration(srv.TimeoutSeconds) * time.Second)
 	}
+}
+
+func (o *Orchestrator) rmStatusR(serviceName string) {
+	fMux.Lock()
+	delete(o.status, serviceName)
+	fMux.Unlock()
 }
 
 func (o *Orchestrator) ServiceStatus(serviceName string) (*ServiceStatusInfo, error) {
