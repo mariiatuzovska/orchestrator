@@ -34,7 +34,8 @@ func (o *Orchestrator) Server() *Server {
 	s.GET("/orchestrator", func(c echo.Context) error { return c.JSON(http.StatusOK, s.Routes()) })
 	s.GET("/orchestrator/services", s.GetServicesController)
 	// SERVICES
-	s.GET("/orchestrator/services", s.GetServicesController)
+	s.PUT("/orchestrator/services", s.UpdateServiceController)
+	s.POST("/orchestrator/services/:ServiceName", s.StartServiceStatusRoutineByNameController)
 	s.GET("/orchestrator/services/:ServiceName", s.GetServiceByNameController)
 	// SERVICES: START / STOP
 	s.POST("/orchestrator/services/:ServiceName/:NodeName", s.StartServiceByNameController)
@@ -81,6 +82,60 @@ func (s *Server) GetServiceByNameController(c echo.Context) error {
 	srv, err := s.Orchestrator.GetService(name[0])
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, JSONMessage{err.Error()})
+	}
+	return c.JSON(http.StatusOK, srv)
+}
+
+/*
+StartServiceStatusRoutineByNameController - Starts service status routine
+@url /orchestrator/services/<ServiceName>
+@method POST
+@response Service
+@response-type application/json
+*/
+func (s *Server) StartServiceStatusRoutineByNameController(c echo.Context) error {
+	name := c.ParamValues()
+	if len(name) != 1 {
+		return c.JSON(http.StatusBadRequest, JSONMessage{"Can't bind url parameter"})
+	}
+	if _, err := s.Orchestrator.GetService(name[0]); err != nil {
+		return c.JSON(http.StatusBadRequest, JSONMessage{err.Error()})
+	}
+	go s.Orchestrator.ServiceStatusRoutine(name[0])
+	srv, err := s.Orchestrator.GetService(name[0])
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, JSONMessage{err.Error()})
+	}
+	return c.JSON(http.StatusOK, srv)
+}
+
+/*
+UpdateServiceController - Updates service by ServiceName
+@url /orchestrator/services
+@method PUT
+@response Service
+@response-type application/json
+*/
+func (s *Server) UpdateServiceController(c echo.Context) error {
+	request := new(ServiceInfo)
+	if err := c.Bind(request); err != nil {
+		return c.JSON(http.StatusBadRequest, JSONMessage{Message: err.Error()})
+	}
+	srv, err := s.Orchestrator.GetService(request.ServiceName)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, JSONMessage{Message: err.Error()})
+	}
+	srv.TimeoutSeconds = request.TimeoutSeconds
+	srv.HTTPAccess = request.HTTPAccess
+	srv.URL = request.URL
+	if err := srv.Valid(); err != nil {
+		return c.JSON(http.StatusBadRequest, JSONMessage{Message: err.Error()})
+	}
+	if err := s.Orchestrator.RemoveService(request.ServiceName); err != nil {
+		return c.JSON(http.StatusBadRequest, JSONMessage{Message: err.Error()})
+	}
+	if err := s.Orchestrator.RegistrateServices(srv); err != nil {
+		return c.JSON(http.StatusInternalServerError, JSONMessage{Message: err.Error()})
 	}
 	return c.JSON(http.StatusOK, srv)
 }
