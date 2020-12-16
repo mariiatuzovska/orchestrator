@@ -232,13 +232,15 @@ func (o *Orchestrator) ServiceStatusRoutine(serviceName string) {
 		status, err := o.ServiceStatus(srv.ServiceName) // returns error if only service is unknown
 		if err != nil {                                 // in case on nil service -- routine stops
 			o.ch <- Event{srv.ServiceName, *status, err}
-			o.rmStatusR(serviceName)
+			o.rmStatusR(srv.ServiceName)
+			o.logf(DEBUG, "'%s' service has status error: %s", srv.ServiceName, err.Error())
 			return
 		}
 		o.ch <- Event{srv.ServiceName, *status, nil}
 		o.logf(DEBUG, "'%s' service has status=%d", srv.ServiceName, status.ServiceStatus)
 		if srv.TimeoutSeconds < 1 {
-			o.rmStatusR(serviceName)
+			o.rmStatusR(srv.ServiceName)
+			o.logf(WARNING, "'%s' service has too short timeout=%d", srv.ServiceName, srv.TimeoutSeconds)
 			return
 		}
 		time.Sleep(time.Duration(srv.TimeoutSeconds) * time.Second)
