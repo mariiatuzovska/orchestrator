@@ -112,6 +112,17 @@ func (o *Orchestrator) RegistrateNodes(nodes ...*Node) error {
 			return o.Errorf("'%s' node already exist", node.NodeName)
 		}
 		fMux.Lock()
+		for _, n := range o.node {
+			if n.Connection == nil && node.Connection == nil {
+				fMux.Unlock()
+				return o.Errorf("'%s' local node already exist", n.NodeName)
+			} else if n.Connection != nil && node.Connection != nil {
+				if n.Connection.Host == node.Connection.Host {
+					fMux.Unlock()
+					return o.Errorf("'%s' node already exist with same '%s' host", node.NodeName, node.Connection.Host)
+				}
+			}
+		}
 		o.node[node.NodeName] = node
 		fMux.Unlock()
 	}
