@@ -23,6 +23,7 @@ type Orchestrator struct {
 	node     map[string]*Node
 	service  map[string]*Service
 	client   map[string]*ssh.Client // node's client
+	status   map[string]bool
 }
 
 type Event struct {
@@ -32,7 +33,7 @@ type Event struct {
 }
 
 func NewOrchestrator() *Orchestrator {
-	return &Orchestrator{ERROR, make(chan Event, 100), make(map[string]*Node), make(map[string]*Service), make(map[string]*ssh.Client)}
+	return &Orchestrator{ERROR, make(chan Event, 100), make(map[string]*Node), make(map[string]*Service), make(map[string]*ssh.Client), make(map[string]bool)}
 }
 
 func (o *Orchestrator) GetNode(name string) (*Node, error) {
@@ -193,7 +194,7 @@ func (o *Orchestrator) RemoveService(names ...string) error {
 func (o *Orchestrator) Start() {
 	time.Sleep(time.Duration(1) * time.Second)
 	for _, srv := range o.service {
-		go o.serviceStatusRoutine(srv.ServiceName)
+		go o.ServiceStatusRoutine(srv.ServiceName)
 	}
 	for {
 		e := <-o.ch
@@ -212,21 +213,36 @@ func (o *Orchestrator) Start() {
 	}
 }
 
-func (o *Orchestrator) serviceStatusRoutine(serviceName string) error {
-	srv, exist := o.service[serviceName]
-	if !exist {
-		return o.Errorf("Service access: '%s' service is unknown", serviceName)
+func (o *Orchestrator) ServiceStatusRoutine(serviceName string) {
+	srv, err := o.GetService(serviceName)
+	if err != nil {
+		o.logf(ERROR, err.Error())
+		return
 	}
+	fMux.Lock()
+	if _, exist := o.status[serviceName]; exist {
+		fMux.Unlock()
+		o.logf(ERROR, "'%s' service already in use", serviceName)
+		return
+	}
+	o.status[serviceName] = true
+	fMux.Unlock()
 	for { // func ServiceStatus is mutual excluded
 		status, err := o.ServiceStatus(srv.ServiceName) // returns error if only service is unknown
 		if err != nil {                                 // in case on nil service -- routine stops
 			o.ch <- Event{srv.ServiceName, *status, err}
-			return err
+			fMux.Lock()
+			delete(o.status, serviceName)
+			fMux.Unlock()
+			return
 		}
 		o.ch <- Event{srv.ServiceName, *status, nil}
 		o.logf(DEBUG, "'%s' service has status=%d", srv.ServiceName, status.ServiceStatus)
 		if srv.TimeoutSeconds < 1 {
-			return nil
+			fMux.Lock()
+			delete(o.status, serviceName)
+			fMux.Unlock()
+			return
 		}
 		time.Sleep(time.Duration(srv.TimeoutSeconds) * time.Second)
 	}
